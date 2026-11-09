@@ -5,8 +5,8 @@
 // ============================================================================
 const LEVELS = [
   {
-    key: 'gravity-works', name: 'Gravity Works', board: [11, 5, 6], par: 1,
-    brief: 'Welcome to the workshop. Every machine starts with something falling. The ramps are already set up. Take the bowling ball from the bin, hold it above the top of the first ramp and click. When you press Run, gravity does the rest.',
+    key: 'gravity-works', name: 'Tyngdekraften virker', board: [11, 5, 6], par: 1,
+    brief: 'Velkommen til verkstedet! Rampene står klare. Dra bowlingkula fra kassen, og slipp den øverst på den første rampa. Trykk så på Start. Tyngdekraften gjør resten.',
     fixed: [
       ['block', 0, 0, 2], ['block', 0, 1, 2], ['block', 0, 2, 2], ['block', 0, 3, 2],
       ['ramp', 1, 4, 2, 0], ['ramp', 3, 3, 2, 0], ['ramp', 5, 2, 2, 0], ['ramp', 7, 1, 2, 0],
@@ -17,8 +17,8 @@ const LEVELS = [
     solution: [['bowling', 1, 5, 2, 0]]
   },
   {
-    key: 'downhill', name: 'Downhill Racer', board: [7, 8, 7], par: 4,
-    brief: 'The ball is ready at the top of the tower. Build it a road down to the funnel at the front. A ramp drops one level for every two cells, so each new ramp sits one level below the end of the last one. Press E and Q to raise and lower the part you are holding. The curved rail turns a rolling ball through a right angle.',
+    key: 'downhill', name: 'Nedoverbakke', board: [7, 8, 7], par: 4,
+    brief: 'Kula ligger klar øverst i tårnet. Bygg en vei ned til trakten foran. En rampe går ett hakk ned for hver to ruter, så hver ny rampe må stå ett hakk lavere enn den forrige. Bruk Opp og Ned for å flytte en del opp og ned. Svingskinnen får kula til å svinge.',
     fixed: [
       ['block', 0, 0, 1], ['block', 0, 1, 1], ['block', 0, 2, 1], ['block', 0, 3, 1], ['block', 0, 4, 1],
       ['ramp', 1, 5, 1, 0], ['bowling', 1, 6, 1, 0],
@@ -29,8 +29,8 @@ const LEVELS = [
     solution: [['ramp', 3, 4, 1, 0], ['curve', 5, 4, 1, 0], ['ramp', 5, 3, 2, 3], ['ramp', 5, 2, 4, 3]]
   },
   {
-    key: 'knock-on', name: 'Knock-On Effect', board: [12, 5, 5], par: 4,
-    brief: 'A line of dominoes with gaps in it, and a bell at the far end. Fill the gaps so that each domino stands one cell from the next. A domino falls the way it faces. Something also has to push the first one: the Spring Ram fires by itself half a second after you press Run.',
+    key: 'knock-on', name: 'Dominoeffekten', board: [12, 5, 5], par: 4,
+    brief: 'En rekke dominobrikker med hull i, og ei bjelle på slutten. Fyll hullene, så det er én rute mellom hver brikke. En brikke faller den veien den peker. Noe må dytte den første. Fjærstøteren smeller av seg selv rett etter at du trykker Start.',
     fixed: [
       ['domino', 1, 0, 2, 0], ['domino', 2, 0, 2, 0], ['domino', 4, 0, 2, 0], ['domino', 5, 0, 2, 0], ['domino', 7, 0, 2, 0], ['domino', 9, 0, 2, 0],
       ['bell', 10, 0, 2, 2, { id: 'bell' }]
@@ -40,8 +40,8 @@ const LEVELS = [
     solution: [['ram', 0, 0, 2, 0], ['domino', 3, 0, 2, 0], ['domino', 6, 0, 2, 0], ['domino', 8, 0, 2, 0]]
   },
   {
-    key: 'bounce-house', name: 'Bounce House', board: [10, 5, 6], par: 1,
-    brief: 'The bowling ball is about to roll off its ramp and thud onto the mat, and there is a wall between it and the basket. A trampoline throws anything back up about as high as it fell from, and it keeps moving forward as it goes. Even bowling balls.',
+    key: 'bounce-house', name: 'Hoppeslottet', board: [10, 5, 6], par: 1,
+    brief: 'Bowlingkula triller ned rampa og dunker i gulvet. Men det står en vegg mellom kula og kurven. En trampoline spretter ting opp igjen, nesten like høyt som de falt fra. Og de fortsetter framover. Til og med bowlingkuler!',
     fixed: [
       ['block', 0, 0, 2], ['block', 0, 1, 2], ['block', 0, 2, 2],
       ['ramp', 0, 3, 2, 0], ['bowling', 0, 4, 2, 0],
@@ -53,8 +53,8 @@ const LEVELS = [
     solution: [['trampoline', 3, 0, 2, 0]]
   },
   {
-    key: 'seesaw-fling', name: 'Seesaw Fling', board: [9, 5, 9], par: 1,
-    brief: 'The bell hangs far out of reach, which was rather the point. When the machine starts, the rubber ball drops to the mat, and the bowling ball rolls down into the funnel and drops out of the bottom. Place a seesaw so that each ball lands on one end of it.',
+    key: 'seesaw-fling', name: 'Vippetrikset', board: [9, 5, 9], par: 1,
+    brief: 'Bjella henger høyt oppe, og det er med vilje. Når maskinen starter, faller sprettballen ned på gulvet. Bowlingkula triller ned i trakten og faller ut i bunnen. Sett en dumphuske slik at hver kule lander på hver sin ende.',
     fixed: [
       ['ramp', 2, 7, 2, 0], ['bowling', 2, 8, 2, 0], ['funnel', 4, 6, 2, 0], ['block', 5, 6, 2], ['block', 5, 7, 2],
       ['rubber', 2, 1, 2, 0], ['bell', 2, 5, 2, 0, { id: 'bell' }]
@@ -64,8 +64,8 @@ const LEVELS = [
     solution: [['seesaw', 2, 0, 2, 0]]
   },
   {
-    key: 'hot-air', name: 'Hot Air', board: [8, 7, 8], par: 1,
-    brief: 'A balloon has floated up under the shelf and is stuck there, sulking. Push it out so it can rise into the pin boards. A fan only blows along its own level, and walls block it on three sides.',
+    key: 'hot-air', name: 'Varm luft', board: [8, 7, 8], par: 1,
+    brief: 'En ballong har flydd opp under hylla og sitter fast. Den er sur. Blås den ut, så den kan fly opp i spikerbrettet. En vifte blåser bare rett fram, i sin egen høyde. Det er vegger på tre sider.',
     fixed: [
       ['balloon', 3, 0, 2, 0, { id: 'bal' }],
       ['platform', 3, 2, 2], ['platform', 3, 2, 3], ['platform', 2, 2, 2], ['platform', 4, 2, 2],
@@ -77,8 +77,8 @@ const LEVELS = [
     solution: [['fan', 3, 1, 1, 3]]
   },
   {
-    key: 'breezy', name: 'Breezy Does It', board: [10, 6, 6], par: 1,
-    brief: 'Pressure plates are switches. When anything with some weight lands on one, every gadget wired to the same colour switches on, and stays on. Here the fan and the bulb are both on the red wire. Find where the rubber ball comes down and put a red plate there.',
+    key: 'breezy', name: 'En lett bris', board: [10, 6, 6], par: 1,
+    brief: 'Trykkplater er brytere. Når noe tungt lander på en, slås alt med samme farge på, og det blir stående på. Her er både vifta og lyspæra røde. Finn ut hvor sprettballen lander, og legg en rød trykkplate der.',
     fixed: [
       ['block', 0, 0, 2], ['block', 0, 1, 2], ['ramp', 0, 2, 2, 0], ['rubber', 0, 3, 2, 0],
       ['lamp', 3, 0, 0, 0, { id: 'bulb', ch: 'red' }],
@@ -90,8 +90,8 @@ const LEVELS = [
     solution: [['button', 3, 0, 2, 0]]
   },
   {
-    key: 'magnetic', name: 'Pull Yourself Together', board: [9, 5, 6], par: 2,
-    brief: 'The steel ball is perfectly happy on top of its tower, and it needs to be persuaded into the basket. A magnet pulls steel toward its open end from up to four cells away. Put it too close and the ball just jumps across and sticks to it.',
+    key: 'magnetic', name: 'Magnetmagi', board: [9, 5, 6], par: 2,
+    brief: 'Stålkula ligger trygt på toppen av tårnet. Den må lokkes ned i kurven. En magnet drar i stålkuler fra opptil fire ruter unna. Står magneten for nær, hopper kula bort og setter seg fast på den.',
     fixed: [
       ['block', 1, 0, 2], ['block', 1, 1, 2], ['block', 1, 2, 2], ['marble', 1, 3, 2, 0],
       ['basket', 2, 0, 2, 0, { id: 'bk' }]
@@ -101,8 +101,8 @@ const LEVELS = [
     solution: [['magnet', 4, 3, 2, 2], ['funnel', 2, 1, 2, 0]]
   },
   {
-    key: 'rush-hour', name: 'Rush Hour', board: [8, 6, 5], par: 2,
-    brief: 'A parcel for the pressure plate, and it is running late. The belt carries the box to its end and drops it off. Two more belts and some careful steering should get it the rest of the way. The yellow arrow on a belt shows which way it runs.',
+    key: 'rush-hour', name: 'Rushtid', board: [8, 6, 5], par: 2,
+    brief: 'En pakke skal fram til trykkplaten, og den er sent ute. Båndet frakter esken til enden og slipper den av. Med to bånd til, og litt lur styring, kommer den fram. Den gule pila på båndet viser hvilken vei det går.',
     fixed: [
       ['conveyor', 0, 0, 1, 0], ['crate', 0, 1, 1, 0],
       ['button', 4, 0, 3, 0, { ch: 'green', id: 'plate' }], ['lamp', 6, 0, 1, 0, { id: 'bulb', ch: 'green' }]
@@ -112,8 +112,8 @@ const LEVELS = [
     solution: [['conveyor', 2, 0, 1, 3], ['conveyor', 2, 0, 3, 0]]
   },
   {
-    key: 'pinball', name: 'Pinball Wizard', board: [9, 7, 5], par: 2,
-    brief: 'Kickers boot anything that touches them toward their arrow, whichever way it arrives. The bowling ball rolls along the back row and the bell is at the front. There is a wall in the way with a single gap in it.',
+    key: 'pinball', name: 'Flipperspill', board: [9, 7, 5], par: 2,
+    brief: 'Sparkere sender alt som treffer dem, dit pila peker. Det spiller ingen rolle hvor det kommer fra. Bowlingkula triller langs bakerste rad, og bjella står foran. En vegg står i veien, med bare én åpning.',
     fixed: [
       ['block', 0, 0, 1], ['block', 0, 1, 1], ['ramp', 0, 2, 1, 0], ['bowling', 0, 3, 1, 0],
       ['block', 2, 0, 3], ['block', 3, 0, 3], ['block', 4, 0, 3], ['block', 5, 0, 3], ['block', 6, 0, 3], ['block', 8, 0, 3],
@@ -124,8 +124,8 @@ const LEVELS = [
     solution: [['bumper', 7, 0, 1, 3], ['bumper', 7, 0, 5, 0]]
   },
   {
-    key: 'domino-theory', name: 'Domino Theory', board: [12, 7, 6], par: 3,
-    brief: 'Everything on the blue wire switches on together: the fan and the bulb. The dominoes should finish on a pressure plate, but a new plate comes wired red. Press C while holding it to change its colour. Once the fan starts, the balloon needs something sharp waiting where it goes.',
+    key: 'domino-theory', name: 'Dominoteori', board: [12, 7, 6], par: 3,
+    brief: 'Alt med blå farge slås på samtidig: vifta og lyspæra. Dominobrikkene skal ende på en trykkplate. Men en ny plate er rød. Velg den og trykk på Farge for å gjøre den blå. Når vifta starter, trenger ballongen noe spisst der den havner.',
     fixed: [
       ['ram', 0, 0, 1, 0], ['domino', 1, 0, 1, 0], ['domino', 2, 0, 1, 0], ['domino', 4, 0, 1, 0], ['domino', 5, 0, 1, 0], ['domino', 6, 0, 1, 0],
       ['lamp', 5, 0, 4, 0, { id: 'bulb', ch: 'blue' }],
@@ -136,8 +136,8 @@ const LEVELS = [
     solution: [['domino', 3, 0, 1, 0], ['button', 7, 0, 1, 0, { ch: 'blue' }], ['cactus', 10, 3, 4, 0]]
   },
   {
-    key: 'grand-apparatus', name: 'The Grand Apparatus', board: [14, 8, 8], par: 5,
-    brief: 'My masterpiece, very nearly finished. One push of the ram should set off the dominoes, and the last domino lands on the yellow plate. That plate starts the belt and lights the bulb, and the belt should end with a bell ringing far overhead. A balloon is waiting for its moment under the shelf at the side. I am missing five parts. You will work out which.',
+    key: 'grand-apparatus', name: 'Det store apparatet', board: [14, 8, 8], par: 5,
+    brief: 'Mitt mesterverk, nesten ferdig! Fjærstøteren setter i gang dominobrikkene, og den siste lander på den gule platen. Da starter båndet og pæra lyser. Til slutt skal ei bjelle ringe høyt oppe. En ballong venter under hylla på siden. Jeg mangler fem deler. Klarer du å finne ut hvilke?',
     fixed: [
       ['ram', 0, 0, 1, 0], ['domino', 1, 0, 1, 0], ['domino', 2, 0, 1, 0], ['domino', 4, 0, 1, 0], ['domino', 6, 0, 1, 0],
       ['button', 7, 0, 1, 0, { ch: 'yellow', id: 'plate' }], ['lamp', 9, 0, 0, 0, { ch: 'yellow', id: 'bulb' }],
@@ -154,12 +154,12 @@ const LEVELS = [
 ];
 
 const SANDBOX = {
-  key: 'sandbox', name: 'Free Workshop', board: [16, 11, 9], par: 0, goals: [], fixed: [],
+  key: 'sandbox', name: 'Fritt verksted', board: [16, 11, 9], par: 0, goals: [], fixed: [],
   bin: Object.fromEntries(PART_ORDER.map(id => [id, -1]))
 };
 
 const SHOWCASE = {
-  key: 'showcase', name: 'Showcase', board: [14, 8, 9], loop: 12,
+  key: 'showcase', name: 'Utstilling', board: [14, 8, 9], loop: 12,
   goals: [{ type: 'ring', id: 'b1' }, { type: 'ring', id: 'b2' }, { type: 'pop', id: 'bal' }, { type: 'inside', id: 'bk', what: 'bowling' }],
   fixed: [
     // front: the long downhill run

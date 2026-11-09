@@ -11,7 +11,29 @@ const ptr = { x: 0, y: 0, down: false, sx: 0, sy: 0, t: 0, moved: false, button:
 let floorPick = null, ghost = null, hoverInst = null, selBox = null, guides = null, hintGhost = null;
 let planeH = null;           // null = snap to surfaces; number = working plane height while holding
 let grab = [0, 0];           // keeps a picked-up part under the cursor
+let selInst = null, selOutline = null;   // the placed part the tool buttons act on (tap to select)
+let gesture = null;          // the pointer gesture in progress: look | held | part | bin
+const activePointers = new Set();
+const undoStack = [];
 const THUMBS = {};
+
+// Touch or mouse: decided by the last pointer used, so an iPad with a trackpad works too.
+let usingTouch = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false;
+function setTouchUI(on) {
+  if (on === usingTouch && document.body.classList.contains('touch') === on) return;
+  usingTouch = on;
+  document.body.classList.toggle('touch', on);
+  updateStatus();
+}
+
+// One finger (or the left mouse button) orbits the camera, except while a part is being
+// held or dragged: then it moves the part, and two fingers turn and zoom the view instead.
+function syncCamera() {
+  const block = !!Game.held || (gesture && gesture.kind === 'part');
+  controls.mouseButtons.LEFT = block ? -1 : THREE.MOUSE.ROTATE;
+  controls.touches.ONE = block ? -1 : THREE.TOUCH.ROTATE;
+  controls.touches.TWO = block ? THREE.TOUCH.DOLLY_ROTATE : THREE.TOUCH.DOLLY_PAN;
+}
 
 // ---------------------------------------------------------------------------
 //  Thumbnails: each part is rendered once with a tiny offscreen renderer
@@ -68,9 +90,109 @@ function removeInst(inst) {
   if (n >= 0) Game.insts.splice(n, 1);
   scene.remove(inst.group);
   if (hoverInst === inst) setHover(null);
+  if (selInst === inst) select(null);
   benchChanged();
 }
-function clearInsts() { for (const inst of Game.insts) scene.remove(inst.group); Game.insts = []; setHover(null); }
+function clearInsts() { for (const inst of Game.insts) scene.remove(inst.group); Game.insts = []; setHover(null); select(null); }
+// Swap a placed part for a moved/turned copy, keeping it selected
+function replaceInst(inst, i, j, k, r) {
+  const wasSel = selInst === inst;
+  removeInst(inst);
+  const ni = new Inst(inst.type, i, j, k, r, { ch: inst.ch });
+  addInst(ni);
+  if (wasSel) select(ni);
+  return ni;
+}
+
+// ---------------------------------------------------------------------------
+//  Undo: a snapshot of the player's parts and the bin before each change
+// ---------------------------------------------------------------------------
+function snapshot() { return { placed: placedSpecs(), bin: { ...Game.bin } }; }
+function pushUndo(snap = snapshot()) {
+  undoStack.push(snap);
+  if (undoStack.length > 80) undoStack.shift();
+  updateTools();
+}
+function undo() {
+  if (Game.mode !== 'edit') return;
+  if (Game.held) { cancelHeld(); return; } // putting down what you hold is the first undo
+  const s = undoStack.pop();
+  if (!s) { Sound.nope(); toast('Det er ingenting å angre.', '', 1400); return; }
+  for (const inst of Game.insts.filter(x => !x.fixed)) scene.remove(inst.group);
+  Game.insts = Game.insts.filter(x => x.fixed);
+  for (const p of s.placed) { const inst = makeInst(p, false); Game.insts.push(inst); scene.add(inst.group); }
+  Game.bin = { ...s.bin };
+  setHover(null); select(null);
+  benchChanged();
+  Sound.remove();
+  renderBin(); updateTools(); updatePointer();
+}
+
+// ---------------------------------------------------------------------------
+//  Selection: tap a placed part, then Turn / Up / Down / Colour / Remove act on it
+// ---------------------------------------------------------------------------
+function select(inst) {
+  if (inst && (inst.fixed || Game.mode !== 'edit')) inst = null;
+  if (selInst === inst) return;
+  selInst = inst;
+  if (selOutline) { scene.remove(selOutline); selOutline = null; }
+  if (inst) {
+    selOutline = new THREE.Box3Helper(cellBox(inst, 0.05), 0xff7b22);
+    selOutline.material.transparent = true; selOutline.material.depthTest = false; selOutline.renderOrder = 6;
+    scene.add(selOutline);
+  }
+  updateTools();
+  updateStatus();
+}
+function cellBox(inst, pad) {
+  const box = new THREE.Box3();
+  for (const [ci, cj, ck] of inst.cells()) {
+    const w = cellToWorld(ci, cj, ck);
+    box.expandByPoint(new THREE.Vector3(w.x - 0.5, cj, w.z - 0.5));
+    box.expandByPoint(new THREE.Vector3(w.x + 0.5, cj + 1, w.z + 0.5));
+  }
+  return box.expandByScalar(pad);
+}
+// What the dock buttons act on; the keyboard also reaches the part under the mouse.
+function toolTarget(keyboard) {
+  if (Game.mode !== 'edit') return null;
+  if (keyboard && hoverInst && !hoverInst.fixed) return hoverInst;
+  return selInst;
+}
+
+// ---------------------------------------------------------------------------
+//  Trails: coloured dots mark where every ball, box and balloon went on the last
+//  run, and stay after Reset so you can see what to change.
+// ---------------------------------------------------------------------------
+const Trail = (() => {
+  const MAX = 2400, GAP = 0.17;
+  const COLORS = { bowling: 0xff9a3d, rubber: 0xff4f9a, marble: 0x9fe0ff, beach: 0xffe066, crate: 0xf0c27a, balloon: 0xff6b81 };
+  const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.065, 10, 8), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95, depthWrite: false }), MAX);
+  const col = new THREE.Color(), m4 = new THREE.Matrix4();
+  for (let i = 0; i < MAX; i++) mesh.setColorAt(i, col.set(0xffffff));
+  mesh.count = 0; mesh.frustumCulled = false; mesh.renderOrder = 3;
+  scene.add(mesh);
+  const last = new Map();
+  return {
+    clear() { mesh.count = 0; last.clear(); mesh.material.opacity = 0.95; },
+    record(sim) {
+      for (const d of sim.dyn) {
+        if (d.gone || mesh.count >= MAX) continue;
+        const c = COLORS[d.inst.type];
+        if (c === undefined) continue;
+        const p = d.body.position, l = last.get(d);
+        if (l && (p.x - l.x) ** 2 + (p.y - l.y) ** 2 + (p.z - l.z) ** 2 < GAP * GAP) continue;
+        last.set(d, { x: p.x, y: p.y, z: p.z });
+        const n = mesh.count++;
+        mesh.setMatrixAt(n, m4.makeTranslation(p.x, p.y, p.z));
+        mesh.setColorAt(n, col.set(c));
+        mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true;
+      }
+    },
+    fade() { mesh.material.opacity = 0.75; },
+    get count() { return mesh.count; }
+  };
+})();
 function findInst(id) { return Game.insts.find(x => x.id === id); }
 function occMap(except) {
   const m = new Map();
@@ -82,8 +204,8 @@ function placeProblem(type, i, j, k, r, except) {
   for (const [x, y, z] of PARTS[type].cells) {
     const [dx, dz] = rotXZ(x, z, r);
     const c = [i + dx, j + y, k + dz];
-    if (!inBoard(c[0], c[1], c[2])) return c[1] >= BOARD.h ? 'Too high — that is above the ceiling of this bench.' : 'That spot is outside the build area.';
-    if (occ.has(c.join(','))) return 'Something is already in that spot.';
+    if (!inBoard(c[0], c[1], c[2])) return c[1] >= BOARD.h ? 'For høyt! Det er over taket på denne benken.' : c[1] < 0 ? 'Lenger ned går det ikke.' : 'Der er du utenfor byggeområdet.';
+    if (occ.has(c.join(','))) return 'Det står noe der allerede.';
   }
   return null;
 }
@@ -139,6 +261,8 @@ function loadLevel(idx, opts = {}) {
   const L = levelByIndex(idx);
   Game.L = L; Game.levelIndex = idx; Game.hintsUsed = 0; Game.won = false; Game.hintStep = 0;
   clearInsts();
+  undoStack.length = 0;
+  Trail.clear();
   BOARD.w = L.board[0]; BOARD.d = L.board[1]; BOARD.h = L.board[2];
   buildSet(L.name);
   makeFloorPick();
@@ -181,7 +305,7 @@ function makeFloorPick() {
 function setMode(m) {
   Game.mode = m;
   const edit = m === 'edit';
-  $('#runLabel').textContent = edit ? 'Run' : 'Reset';
+  $('#runLabel').textContent = edit ? 'Start' : 'Stopp';
   $('#runBtn').classList.toggle('running', !edit);
   $('#runIcon').innerHTML = edit ? '<path d="M7 4l13 8-13 8z"/>' : '<rect x="5" y="5" width="14" height="14" rx="2"/>';
   $('#bin').style.opacity = edit ? '' : '0.55';
@@ -196,11 +320,14 @@ function startRun() {
   cancelHeld();
   hideHint();
   setHover(null);
+  select(null);
+  Trail.clear();
   Game.sim = new Sim(Game.insts, Game.L.goals, { listeners: simListeners });
   Game.acc = 0; Game.won = false; Game.stallShown = false;
   setMode('run');
   renderGoals();
   Sound.start();
+  Sound.duck(true);
 }
 function stopRun(silent) {
   if (!Game.sim) return;
@@ -210,6 +337,8 @@ function stopRun(silent) {
   FX.clear();
   clearPopTexts();
   Sound.setHum(0);
+  Sound.duck(false);
+  Trail.fade();
   if (!silent) Sound.reset();
   setMode('edit');
   renderGoals();
@@ -231,16 +360,16 @@ const simListeners = {
       }
       case 'boing': Sound.boing(); FX.burst('spark', p, 8, { colors: [0x9fd0ff, 0xffffff], speed: 2.5, life: 0.45, gravity: 3 }); break;
       case 'bumper': Sound.bumper(); FX.burst('spark', p, 12, { colors: [0xff3d7f, 0xffe066], speed: 4.5, life: 0.4, gravity: 2 }); break;
-      case 'bell': Sound.bell(); FX.burst('spark', p, 24, { colors: [0xffd34d, 0xfff3b0], speed: 3.6, life: 0.8, gravity: 1 }); popText(p, 'Ding!', '#ffd34d'); break;
-      case 'pop': Sound.pop(); FX.burst('confetti', p, 30, { colors: [0xff3b5c, 0xff6b81, 0xffd0d8], speed: 4.5, life: 1.3, gravity: 6 }); popText(p, 'Pop!', '#ff6b81'); break;
-      case 'press': Sound.press(); popText(p, 'Click!', '#eef5ff'); break;
+      case 'bell': Sound.bell(); FX.burst('spark', p, 24, { colors: [0xffd34d, 0xfff3b0], speed: 3.6, life: 0.8, gravity: 1 }); popText(p, 'Pling!', '#ffd34d'); break;
+      case 'pop': Sound.pop(); FX.burst('confetti', p, 30, { colors: [0xff3b5c, 0xff6b81, 0xffd0d8], speed: 4.5, life: 1.3, gravity: 6 }); popText(p, 'Pang!', '#ff6b81'); break;
+      case 'press': Sound.press(); popText(p, 'Klikk!', '#eef5ff'); break;
       case 'channel': Sound.zap(); FX.burst('spark', p, 18, { colors: [CH_HEX[val], 0xffffff], speed: 3.2, life: 0.55, gravity: 2 }); break;
       case 'ram': Sound.whoosh(); break;
     }
   },
   flag(key, pos) {
-    if (key.startsWith('inside:') && pos) popText(new THREE.Vector3(pos.x, pos.y + 0.4, pos.z), 'In!', '#62e3a4');
-    if (key.startsWith('light:') && pos) popText(new THREE.Vector3(pos.x, pos.y + 0.4, pos.z), 'Let there be light!', '#ffe07a');
+    if (key.startsWith('inside:') && pos) popText(new THREE.Vector3(pos.x, pos.y + 0.4, pos.z), 'Oppi!', '#62e3a4');
+    if (key.startsWith('light:') && pos) popText(new THREE.Vector3(pos.x, pos.y + 0.4, pos.z), 'Det ble lys!', '#ffe07a');
   },
   goal(g) {
     if (Game.attract) return;
@@ -264,7 +393,7 @@ function checkRunState() {
   }
   if (!sim.won && !Game.stallShown && Game.L.goals.length && ((sim.quiet > 2.5 && sim.time > 3) || sim.time > MAX_RUN_TIME)) {
     Game.stallShown = true;
-    toast('The machine has stopped. Press Reset, adjust it, and run it again.', 'warn', 4200);
+    toast(Trail.count ? 'Maskinen har stoppet. Prikkene viser hvor tingene gikk. Trykk Stopp, endre litt og prøv igjen!' : 'Maskinen har stoppet. Trykk Stopp, endre litt og prøv igjen!', 'warn', 5200);
   }
 }
 
@@ -328,7 +457,18 @@ function planeCell(h) {
 }
 
 function updatePointer() {
-  if (Game.mode !== 'edit' || !ptr.inside) { if (ghost) ghost.group.visible = false; setHover(null); hideHoverLabel(); return; }
+  if (Game.mode !== 'edit') { if (ghost) { ghost.group.visible = false; ghost.marker.visible = false; } setHover(null); hideHoverLabel(); return; }
+  // A finger that has lifted leaves no pointer behind: keep a held part where it was put
+  // down, and show no hover.
+  const touchIdle = usingTouch && !ptr.down;
+  if (touchIdle || !ptr.inside) {
+    setHover(null); hideHoverLabel();
+    if (ghost) {
+      if (touchIdle && ghost.cell) setGhostCell(ghost.cell.slice());
+      else if (!touchIdle) { ghost.group.visible = false; ghost.marker.visible = false; }
+    }
+    return;
+  }
   const hits = castHits();
   if (Game.held) {
     let cell = null;
@@ -418,14 +558,7 @@ function setHover(inst) {
   if (selBox) { scene.remove(selBox); selBox = null; }
   canvas.style.cursor = inst ? (inst.fixed ? 'not-allowed' : 'grab') : '';
   if (inst) {
-    const box = new THREE.Box3();
-    for (const [ci, cj, ck] of inst.cells()) {
-      const w = cellToWorld(ci, cj, ck);
-      box.expandByPoint(new THREE.Vector3(w.x - 0.5, cj, w.z - 0.5));
-      box.expandByPoint(new THREE.Vector3(w.x + 0.5, cj + 1, w.z + 0.5));
-    }
-    box.expandByScalar(0.02);
-    selBox = new THREE.Box3Helper(box, inst.fixed ? 0xe8b75e : 0x7cf0b0);
+    selBox = new THREE.Box3Helper(cellBox(inst, 0.02), inst.fixed ? 0xe8b75e : 0x7cf0b0);
     selBox.material.transparent = true; selBox.material.opacity = 0.85; selBox.material.depthTest = false;
     scene.add(selBox);
     showHoverLabel(inst);
@@ -434,7 +567,7 @@ function setHover(inst) {
 }
 function showHoverLabel(inst) {
   const el = $('#hoverLabel');
-  el.textContent = inst.def.name + (inst.fixed ? '  ·  part of the puzzle' : '') + (inst.ch ? '  ·  ' + CH_LABEL[inst.ch] + ' wire' : '');
+  el.textContent = inst.def.name + (inst.fixed ? '  ·  hører til brettet' : '') + (inst.ch ? '  ·  ' + CH_ADJ[inst.ch] + ' ledning' : '');
   el.style.left = ptr.x + 'px'; el.style.top = ptr.y + 'px';
   el.hidden = false;
 }
@@ -445,32 +578,51 @@ function hideHoverLabel() { $('#hoverLabel').hidden = true; }
 // ---------------------------------------------------------------------------
 function holdFromBin(type, keep = {}) {
   if (Game.mode !== 'edit') return;
-  if (Game.held && Game.held.from) cancelHeld();
-  if (!(Game.bin[type] > 0)) { Sound.nope(); return; }
+  if (Game.held && Game.held.from) cancelHeld(true);
+  if (!(Game.bin[type] > 0)) { Sound.nope(); toast('Det er tomt for denne delen.', 'warn', 1500); return; }
   const def = PARTS[type];
   const ch = keep.ch !== undefined ? keep.ch : (def.defaultCh ?? null);
   Game.held = { type, r: keep.r ?? (Game.held && Game.held.type === type ? Game.held.r : 0), ch, from: null };
   if (!keep.continuing) { planeH = null; grab = [0, 0]; }
   makeGhost(type, Game.held.r, ch);
-  controls.mouseButtons.LEFT = -1;
+  select(null);
+  syncCamera();
   setHover(null);
   renderBinActive();
   updateTools();
   updatePointer();
+  // A tap on a card with a finger: park the part in the middle of the bench, where it can
+  // be seen and dragged into place.
+  if (keep.park && ghost && !ghost.cell) setGhostCell(parkCell(type, Game.held.r));
   if (!keep.continuing) Sound.pickup();
+}
+function parkCell(type, r) {
+  const ci = Math.floor(BOARD.w / 2), ck = Math.floor(BOARD.d / 2);
+  for (let j = 0; j < BOARD.h; j++) for (let ring = 0; ring < Math.max(BOARD.w, BOARD.d); ring++)
+    for (let di = -ring; di <= ring; di++) for (let dk = -ring; dk <= ring; dk++) {
+      if (Math.max(Math.abs(di), Math.abs(dk)) !== ring) continue;
+      if (!placeProblem(type, ci + di, j, ck + dk, r)) return [ci + di, j, ck + dk];
+    }
+  return [ci, 0, ck];
 }
 function pickUp(inst) {
   if (inst.fixed || Game.mode !== 'edit') return;
-  const hits = castHits();
+  const snap = snapshot();
   removeInst(inst);
-  Game.held = { type: inst.type, r: inst.r, ch: inst.ch, from: { i: inst.i, j: inst.j, k: inst.k, r: inst.r, ch: inst.ch } };
-  planeH = inst.j;
-  raycaster.setFromCamera(ndc, camera);
-  const pc = planeCell(planeH);
-  grab = pc ? [inst.i - pc[0], inst.k - pc[2]] : [0, 0];
-  void hits;
+  Game.held = { type: inst.type, r: inst.r, ch: inst.ch, from: { i: inst.i, j: inst.j, k: inst.k, r: inst.r, ch: inst.ch }, undoSnap: snap };
+  // Parts lifted off the mat follow the surfaces under the pointer (so they can be dropped
+  // on top of things); parts already up in the air keep their height while they move.
+  planeH = inst.j > 0 ? inst.j : null;
+  grab = [0, 0];
+  if (planeH !== null) {
+    const rect = canvas.getBoundingClientRect();
+    ndc.set(((ptr.x - rect.left) / rect.width) * 2 - 1, -((ptr.y - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    const pc = planeCell(planeH);
+    if (pc) grab = [inst.i - pc[0], inst.k - pc[2]];
+  }
   makeGhost(inst.type, inst.r, inst.ch);
-  controls.mouseButtons.LEFT = -1;
+  syncCamera();
   Sound.pickup();
   renderBinActive();
   updateTools();
@@ -478,11 +630,12 @@ function pickUp(inst) {
 }
 function tryPlace() {
   const h = Game.held;
-  if (!h || !ghost) return;
-  if (!ghost.cell) return;
+  if (!h || !ghost) return false;
+  if (!ghost.cell) return false;
   const [i, j, k] = ghost.cell;
   const problem = placeProblem(h.type, i, j, k, h.r);
-  if (problem) { Sound.nope(); toast(problem, 'warn', 1800); return; }
+  if (problem) { Sound.nope(); toast(problem, 'warn', 1800); return false; }
+  pushUndo(h.undoSnap || snapshot());
   const inst = new Inst(h.type, i, j, k, h.r, { ch: h.ch });
   addInst(inst);
   Sound.place();
@@ -491,12 +644,15 @@ function tryPlace() {
   if (fromBin && Game.bin[h.type] !== Infinity) Game.bin[h.type]--;
   Game.held = null;
   removeGhost();
-  controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
-  if (fromBin && Game.bin[h.type] > 0) holdFromBin(h.type, { r: h.r, ch: h.ch, continuing: true });
-  else { planeH = null; grab = [0, 0]; }
+  syncCamera();
+  // With a mouse, keep "stamping" more of the same part; with a finger, select the new
+  // part instead so Turn / Up / Down work on it straight away.
+  if (!usingTouch && fromBin && Game.bin[h.type] > 0) holdFromBin(h.type, { r: h.r, ch: h.ch, continuing: true });
+  else { planeH = null; grab = [0, 0]; select(inst); }
   renderBin();
   updateTools();
   updatePointer();
+  return true;
 }
 function cancelHeld(silent) {
   const h = Game.held;
@@ -504,90 +660,116 @@ function cancelHeld(silent) {
   if (h.from) {
     const f = h.from;
     if (!placeProblem(h.type, f.i, f.j, f.k, f.r)) addInst(new Inst(h.type, f.i, f.j, f.k, f.r, { ch: f.ch }));
-    else if (Game.bin[h.type] !== Infinity) Game.bin[h.type] = (Game.bin[h.type] || 0) + 1;
+    else { pushUndo(h.undoSnap); if (Game.bin[h.type] !== Infinity) Game.bin[h.type] = (Game.bin[h.type] || 0) + 1; } // its old spot got taken
   }
   Game.held = null;
   planeH = null; grab = [0, 0];
   removeGhost();
-  controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+  syncCamera();
   renderBin();
   updateTools();
   updateStatus();
   if (!silent) Sound.click();
 }
-function returnToBin(inst) {
+function returnToBin(inst, opts = {}) {
   if (inst) {
-    if (inst.fixed) { Sound.nope(); toast('That part belongs to the puzzle and cannot be removed.', 'warn'); return; }
+    if (inst.fixed) { Sound.nope(); toast('Den delen hører til brettet og kan ikke fjernes.', 'warn'); return; }
+    if (!opts.noUndo) pushUndo();
     removeInst(inst);
     if (Game.bin[inst.type] !== Infinity) Game.bin[inst.type] = (Game.bin[inst.type] || 0) + 1;
   } else if (Game.held) {
     const h = Game.held;
-    if (h.from && Game.bin[h.type] !== Infinity) Game.bin[h.type] = (Game.bin[h.type] || 0) + 1;
+    if (h.from) { pushUndo(h.undoSnap); if (Game.bin[h.type] !== Infinity) Game.bin[h.type] = (Game.bin[h.type] || 0) + 1; }
     Game.held = null; planeH = null; grab = [0, 0];
     removeGhost();
-    controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    syncCamera();
   } else return;
-  Sound.remove();
+  if (!opts.silent) Sound.remove();
   renderBin(); updateTools(); updateStatus(); updatePointer();
 }
-function rotateAction() {
+function rotateAction(keyboard) {
   if (Game.mode !== 'edit') return;
   if (Game.held) {
     Game.held.r = (Game.held.r + 1) % 4;
     ghost.r = Game.held.r;
     Sound.rotate();
+    if (ghost.cell) setGhostCell(ghost.cell.slice());
     updatePointer();
     return;
   }
-  const inst = hoverInst;
-  if (inst && !inst.fixed) {
-    const nr = (inst.r + 1) % 4;
-    if (placeProblem(inst.type, inst.i, inst.j, inst.k, nr, inst)) { Sound.nope(); toast('No room to turn it there.', 'warn', 1500); return; }
-    removeInst(inst);
-    const ni = new Inst(inst.type, inst.i, inst.j, inst.k, nr, { ch: inst.ch });
-    addInst(ni);
+  const inst = toolTarget(keyboard);
+  if (!inst) { nothingSelected(); return; }
+  const nr = (inst.r + 1) % 4;
+  if (placeProblem(inst.type, inst.i, inst.j, inst.k, nr, inst)) { Sound.nope(); toast('Det er ikke plass til å snu den der.', 'warn', 1500); return; }
+  pushUndo();
+  replaceInst(inst, inst.i, inst.j, inst.k, nr);
+  Sound.rotate();
+  updatePointer();
+}
+function heightAction(d, keyboard) {
+  if (Game.mode !== 'edit') return;
+  if (!Game.held) { // move a placed part straight up or down
+    const inst = toolTarget(keyboard);
+    if (!inst) { nothingSelected(); return; }
+    const problem = placeProblem(inst.type, inst.i, inst.j + d, inst.k, inst.r, inst);
+    if (problem) { Sound.nope(); toast(d > 0 && problem.startsWith('Det står') ? 'Det er noe i veien over den.' : d < 0 && problem.startsWith('Det står') ? 'Det er noe i veien under den.' : problem, 'warn', 1600); return; }
+    pushUndo();
+    replaceInst(inst, inst.i, inst.j + d, inst.k, inst.r);
     Sound.rotate();
     updatePointer();
+    return;
   }
-}
-function heightAction(d) {
-  if (Game.mode !== 'edit' || !Game.held) return;
   const cur = ghost && ghost.cell ? ghost.cell[1] : 0;
   const before = ghost && ghost.cell ? ghost.cell.slice() : null;
   const nh = clamp((planeH === null ? cur : planeH) + d, 0, BOARD.h - 1);
   planeH = nh;
-  if (before) {
-    const pc = planeCell(nh);
-    if (pc) grab = [before[0] - pc[0], before[2] - pc[2]];
+  if (usingTouch && !ptr.down) {
+    // no finger on the bench: lift the parked part in place
+    if (before) setGhostCell([before[0], nh, before[2]]);
+    grab = [0, 0];
+  } else {
+    if (before) {
+      const pc = planeCell(nh);
+      if (pc) grab = [before[0] - pc[0], before[2] - pc[2]];
+    }
+    updatePointer();
   }
   Sound.rotate();
-  updatePointer();
 }
-function wireAction() {
+function wireAction(keyboard) {
   if (Game.mode !== 'edit') return;
-  const target = Game.held ? Game.held : (hoverInst && !hoverInst.fixed ? hoverInst : null);
-  const type = Game.held ? Game.held.type : target && target.type;
-  if (!target || !PARTS[type].channel) { Sound.nope(); toast('Only fans, belts, rams, magnets, plates and bulbs take a wire colour.', 'warn', 2200); return; }
+  const target = Game.held ? Game.held : toolTarget(keyboard);
+  const type = target && target.type;
+  if (!target) { nothingSelected(); return; }
+  if (!PARTS[type].channel) { Sound.nope(); toast('Bare vifter, bånd, fjærstøtere, magneter, trykkplater og lyspærer kan få farge.', 'warn', 2400); return; }
   const cycle = PARTS[type].channel === 'switch' ? CHANNELS : [null, ...CHANNELS];
   const next = cycle[(cycle.indexOf(target.ch) + 1) % cycle.length];
-  if (Game.held) { Game.held.ch = next; makeGhost(type, Game.held.r, next); updatePointer(); }
-  else { hoverInst.setChannel(next); showHoverLabel(hoverInst); saveDraftSoon(); }
+  if (Game.held) { Game.held.ch = next; const cell = ghost && ghost.cell; makeGhost(type, Game.held.r, next); if (cell) setGhostCell(cell.slice()); updatePointer(); }
+  else { pushUndo(); target.setChannel(next); if (hoverInst === target) showHoverLabel(target); saveDraftSoon(); }
   Sound.click();
   updateTools();
-  toast(next ? `${CH_LABEL[next]} wire: runs when a ${CH_LABEL[next].toLowerCase()} plate is pressed.` : 'No wire: runs from the moment the machine starts.', '', 1800);
+  const msg = !next ? 'Ingen farge: går hele tiden fra maskinen starter.'
+    : type === 'button' ? `${CH_LABEL[next]}: slår på alt med ${CH_ADJ[next]} farge.`
+    : type === 'lamp' ? `${CH_LABEL[next]}: lyser når en ${CH_ADJ[next]} trykkplate blir trykket.`
+    : `${CH_LABEL[next]}: starter når en ${CH_ADJ[next]} trykkplate blir trykket.`;
+  toast(msg, '', 2400);
+}
+function nothingSelected() {
+  Sound.nope();
+  toast(usingTouch ? 'Trykk på en del du har satt ut først.' : 'Klikk på en del du har satt ut først, eller hold musen over den.', '', 1800);
 }
 
 // ---------------------------------------------------------------------------
 //  Hints: reveal the next part of the reference solution as a golden ghost
 // ---------------------------------------------------------------------------
 function showHint() {
-  if (Game.mode !== 'edit' || !Game.L.solution) { if (!Game.L.solution) toast('No hints in the free workshop. Anything goes.', '', 1800); return; }
+  if (Game.mode !== 'edit' || !Game.L.solution) { if (!Game.L.solution) toast('Det fins ingen tips i det frie verkstedet. Her er alt lov!', '', 2000); return; }
   hideHint();
   const placed = Game.insts.filter(x => !x.fixed);
   const sol = Game.L.solution;
   const match = (s) => placed.some(p => p.type === s[0] && p.i === s[1] && p.j === s[2] && p.k === s[3] && (p.r === (s[4] || 0) || PARTS[p.type].symmetric));
   const next = sol.find(s => !match(s));
-  if (!next) { toast('Every hinted part is already in place. Press Run!', '', 2200); return; }
+  if (!next) { toast('Alle tipsdelene står allerede på plass. Trykk Start!', '', 2200); return; }
   Game.hintsUsed++;
   const [t, i, j, k, r = 0, o = {}] = next;
   const def = PARTS[t];
@@ -600,8 +782,9 @@ function showHint() {
   g.rotation.y = r * Math.PI / 2;
   scene.add(g);
   hintGhost = g;
-  const where = `column ${String.fromCharCode(65 + i)}, row ${k + 1}` + (j ? `, ${j} up` : ', on the mat');
-  toast(`Hint: a ${def.name}${o.ch ? ' on the ' + CH_LABEL[o.ch].toLowerCase() + ' wire' : ''} goes at ${where}.`, '', 3600);
+  const where = `${String.fromCharCode(65 + i)}${k + 1}` + (j ? `, ${j} opp` : '');
+  const art = def.art === 'et' ? 'Et' : 'En';
+  toast(`Tips: ${art} ${def.name.toLowerCase()}${o.ch ? ` med ${CH_ADJ[o.ch]} farge` : ''} skal stå der den gule skyggen er (${where}).`, '', 4200);
   Sound.goal();
 }
 function hideHint() { if (hintGhost) { scene.remove(hintGhost); hintGhost = null; } }
@@ -611,19 +794,19 @@ function hideHint() { if (hintGhost) { scene.remove(hintGhost); hintGhost = null
 // ---------------------------------------------------------------------------
 function renderLevelName() {
   const L = Game.L;
-  $('#levelName').textContent = Game.levelIndex === 'sandbox' ? 'Free workshop · no rules' : `Puzzle ${String(Game.levelIndex + 1).padStart(2, '0')} / ${LEVELS.length} · ${L.name}`;
+  $('#levelName').textContent = Game.levelIndex === 'sandbox' ? 'Fritt verksted · ingen regler' : `Brett ${String(Game.levelIndex + 1).padStart(2, '0')} av ${LEVELS.length} · ${L.name}`;
 }
 function goalText(goal) {
   if (goal.text) return goal.text;
-  const what = goal.what && PARTS[goal.what] ? PARTS[goal.what].name.toLowerCase() : 'object';
+  const what = goal.what && PARTS[goal.what] ? (PARTS[goal.what].the || PARTS[goal.what].name.toLowerCase()) : 'tingen';
   switch (goal.type) {
-    case 'ring': return 'Ring the bell';
-    case 'inside': return `Land the ${what} in the basket`;
-    case 'pop': return 'Pop the balloon';
-    case 'press': return 'Press the plate';
-    case 'light': return 'Light the bulb';
-    case 'topple': return 'Topple every domino';
-    case 'away': return 'Let the balloon fly free';
+    case 'ring': return 'Ring med bjella';
+    case 'inside': return `Få ${what} oppi kurven`;
+    case 'pop': return 'Sprekk ballongen';
+    case 'press': return 'Trykk på trykkplaten';
+    case 'light': return 'Tenn lyspæra';
+    case 'topple': return 'Velt alle dominobrikkene';
+    case 'away': return 'La ballongen fly fritt';
   }
   return goal.type;
 }
@@ -633,7 +816,7 @@ function renderGoals() {
   const goals = Game.L.goals || [];
   if (!goals.length) {
     const li = document.createElement('li'); li.className = 'sandbox';
-    li.textContent = 'No work order. Build whatever you like and press Run.';
+    li.textContent = 'Ingen oppdrag. Bygg hva du vil, og trykk Start.';
     ul.appendChild(li);
   }
   goals.forEach((g, n) => {
@@ -650,15 +833,17 @@ function updateWorkStatus() {
   if (!el || !Game.L) return;
   if (Game.mode === 'run' && Game.sim) {
     const t = Game.sim.time;
-    el.textContent = Game.won ? `Done in ${(Game.winTime ?? t).toFixed(1)} s` : `Running ${t.toFixed(1)} s`;
+    el.textContent = Game.won ? `Ferdig på ${(Game.winTime ?? t).toFixed(1)} s` : `Går · ${t.toFixed(1)} s`;
   } else {
     const n = placedSpecs().length;
-    el.textContent = Game.L.goals.length ? `Par ${Game.L.par} parts · used ${n}` : `${n} parts placed`;
+    const deler = x => x === 1 ? 'del' : 'deler';
+    el.textContent = Game.L.goals.length ? `Mål: ${Game.L.par} ${deler(Game.L.par)} · brukt ${n}` : `${n} ${deler(n)} satt ut`;
   }
 }
 function binTypes() {
   return Object.keys(Game.bin).sort((a, b) => PART_ORDER.indexOf(a) - PART_ORDER.indexOf(b));
 }
+let lastBinDrag = 0;
 function renderBin() {
   const list = $('#binList');
   list.innerHTML = '';
@@ -675,21 +860,29 @@ function renderBin() {
     const card = document.createElement('button');
     card.className = 'card' + (cnt > 0 ? '' : ' empty');
     card.dataset.type = t;
-    card.innerHTML = `${n < 9 ? `<span class="key">${n + 1}</span>` : ''}<img alt="" src="${THUMBS[t] || ''}"><span class="nm"></span><span class="ct">${cnt === Infinity ? '∞' : '×' + cnt}</span>`;
+    card.innerHTML = `${n < 9 ? `<span class="key">${n + 1}</span>` : ''}<img alt="" draggable="false" src="${THUMBS[t] || ''}"><span class="nm"></span><span class="ct">${cnt === Infinity ? '∞' : '×' + cnt}</span>`;
     card.querySelector('.nm').textContent = def.name;
-    card.addEventListener('click', () => { Sound.unlock(); holdFromBin(t); });
-    card.addEventListener('mouseenter', () => showTip(card, def));
-    card.addEventListener('mouseleave', hideTip);
+    // Drag a card out onto the bench, or tap it and then tap the bench.
+    card.addEventListener('pointerdown', (e) => binPointerDown(e, t));
+    card.addEventListener('click', () => {
+      if (performance.now() - lastBinDrag < 450) return;
+      if (Game.held && !Game.held.from && Game.held.type === t) { cancelHeld(); return; } // tap again: put it back
+      holdFromBin(t, { park: usingTouch });
+      if (usingTouch && Game.held) toast(`${def.name}: ${def.desc}`, '', 4000);
+    });
+    card.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') showTip(card, def); });
+    card.addEventListener('pointerleave', hideTip);
     list.appendChild(card);
   });
   if (!types.length) {
     const p = document.createElement('div'); p.className = 'bin-empty-note';
-    p.textContent = 'Nothing to add. Everything you need is already on the bench.';
+    p.textContent = 'Ingenting å legge til. Alt du trenger, står allerede på benken.';
     list.appendChild(p);
   }
-  $('#binCount').textContent = Game.levelIndex === 'sandbox' ? 'unlimited' : `${total} left`;
+  $('#binCount').textContent = Game.levelIndex === 'sandbox' ? 'uendelig' : `${total} igjen`;
   renderBinActive();
   updateWorkStatus();
+  updateTools();
 }
 function renderBinActive() {
   $$('#binList .card').forEach(c => c.classList.toggle('active', !!Game.held && !Game.held.from && c.dataset.type === Game.held.type));
@@ -710,14 +903,16 @@ function hideTip() { $('#tip').hidden = true; }
 function updateTools() {
   const edit = Game.mode === 'edit';
   const h = Game.held;
-  const target = h || (hoverInst && !hoverInst.fixed ? hoverInst : null);
-  $('#rotBtn').disabled = !edit;
-  $('#upBtn').disabled = !edit || !h;
-  $('#downBtn').disabled = !edit || !h;
+  const target = h || selInst;
+  // Buttons that need a part stay pressable but dimmed: pressing one explains what to do.
+  for (const id of ['#rotBtn', '#upBtn', '#downBtn', '#delBtn']) { $(id).disabled = !edit; $(id).classList.toggle('idle', !target); }
   $('#wireBtn').disabled = !edit;
-  $('#delBtn').disabled = !edit;
+  $('#wireBtn').classList.toggle('idle', !target || !PARTS[target.type].channel);
+  // the colour button only shows up on benches where colours matter
+  $('#wireBtn').hidden = !(Game.L && (Game.levelIndex === 'sandbox' || Object.keys(Game.L.bin || {}).some(t => PARTS[t]?.channel)));
+  $('#undoBtn').disabled = !edit || (!undoStack.length && !(h && h.from));
   $('#hintBtn').disabled = !edit || !Game.L || !Game.L.solution;
-  $('#clearBtn').disabled = !edit;
+  $('#clearBtn').disabled = !edit || !Game.insts.some(x => !x.fixed);
   const ch = target ? target.ch : null;
   const dot = $('#wireDot');
   dot.style.background = ch ? CH_CSS[ch] : '#8a919b';
@@ -725,19 +920,28 @@ function updateTools() {
 function updateStatus() {
   const el = $('#status');
   if (!el) return;
-  if (Game.mode === 'run') { el.innerHTML = '<b>Machine running.</b> Drag to look around · <kbd>Space</kbd> reset'; return; }
-  if (Game.held) {
+  const T = usingTouch;
+  if (Game.mode === 'run') {
+    el.innerHTML = T ? '<b>Maskinen går.</b> Dra med én finger for å se deg rundt.' : '<b>Maskinen går.</b> Dra for å se deg rundt · <kbd>Mellomrom</kbd> stopp';
+  } else if (Game.held) {
     const def = PARTS[Game.held.type];
     const hgt = ghost && ghost.cell ? ghost.cell[1] : 0;
-    el.innerHTML = `<b>${def.name}</b> · height ${hgt}${planeH !== null ? ' (locked)' : ''}<br>Click to place · <kbd>R</kbd> rotate · <kbd>Q</kbd>/<kbd>E</kbd> lower/raise${def.channel ? ' · <kbd>C</kbd> wire' : ''} · <kbd>Esc</kbd> cancel`;
-  } else if (hoverInst) {
-    el.innerHTML = hoverInst.fixed ? `<b>${hoverInst.def.name}</b> · part of the puzzle, stays put` : `<b>${hoverInst.def.name}</b> · click to move · <kbd>R</kbd> rotate · <kbd>X</kbd> back to bin${hoverInst.def.channel ? ' · <kbd>C</kbd> wire' : ''}`;
+    el.innerHTML = T
+      ? `<b>${esc(def.name)}</b> · høyde ${hgt}<br>Dra den dit den skal stå, og slipp. Opp og Ned løfter og senker den.`
+      : `<b>${esc(def.name)}</b> · høyde ${hgt}${planeH !== null ? ' (låst)' : ''}<br>Klikk for å sette den ned · <kbd>R</kbd> snu · <kbd>Q</kbd>/<kbd>E</kbd> ned/opp${def.channel ? ' · <kbd>C</kbd> farge' : ''} · <kbd>Esc</kbd> avbryt`;
+  } else if (hoverInst || selInst) {
+    const inst = hoverInst || selInst;
+    if (inst.fixed) el.innerHTML = `<b>${esc(inst.def.name)}</b> · hører til brettet og står fast`;
+    else el.innerHTML = T
+      ? `<b>${esc(inst.def.name)}</b> · ${esc(inst.def.desc)}<br>Dra den for å flytte den, eller bruk knappene nede.`
+      : `<b>${esc(inst.def.name)}</b> · klikk for å velge · dra for å flytte · <kbd>R</kbd> snu · <kbd>Q</kbd>/<kbd>E</kbd> ned/opp · <kbd>X</kbd> tilbake i kassen${inst.def.channel ? ' · <kbd>C</kbd> farge' : ''}`;
   } else {
-    el.innerHTML = 'Pick a part from the bin · drag to orbit · scroll to zoom · <kbd>Space</kbd> run';
+    el.innerHTML = T
+      ? 'Dra en del fra kassen ut på benken. Trykk på en del for å velge den. Dra med én finger for å se deg rundt, og knip med to for å zoome.'
+      : 'Dra en del fra kassen ut på benken · dra for å se deg rundt · rull for å zoome · <kbd>Mellomrom</kbd> start';
   }
   updateTools();
 }
-
 let toastTimer = 0;
 function toast(msg, kind = '', ms = 2400) {
   const t = $('#toast');
@@ -802,19 +1006,19 @@ function chipsFor(bin) {
 function showBrief() {
   const L = Game.L;
   if (Game.levelIndex === 'sandbox') {
-    openModal(`<div class="eyebrow">Free workshop</div><h2>No rules, all the parts</h2>
-      <p>Every gadget in the catalogue, in unlimited supply, on the biggest bench in the shop. There is no work order. Build something absurd, press Run, and enjoy it.</p>
-      <div class="row"><button class="btn primary" data-act="close">Open the workshop</button></div>`);
+    openModal(`<div class="eyebrow">Fritt verksted</div><h2>Ingen regler, alle delene</h2>
+      <p>Alle delene, så mange du vil, på den største benken i verkstedet. Det er ikke noe oppdrag. Bygg noe vilt og trykk Start!</p>
+      <div class="row"><button class="btn primary" data-act="close">Åpne verkstedet</button></div>`);
     return;
   }
   const n = Game.levelIndex + 1;
   const goals = L.goals.map(g => `<li><div class="box"></div><span>${esc(goalText(g))}</span></li>`).join('');
-  openModal(`<div class="eyebrow">Puzzle ${String(n).padStart(2, '0')} of ${LEVELS.length} · par ${L.par} parts</div>
+  openModal(`<div class="eyebrow">Brett ${String(n).padStart(2, '0')} av ${LEVELS.length} · mål: ${L.par} ${L.par === 1 ? 'del' : 'deler'}</div>
     <h2>${esc(L.name)}</h2>
-    <div class="note">${esc(L.brief)}<span class="sig">— O. Gearwhistle, Chief Tinkerer</span></div>
-    <div class="eyebrow">Work order</div><ul class="goals">${goals}</ul>
-    <div class="eyebrow" style="margin-top:14px">In your parts bin</div><div class="chips">${Object.keys(L.bin).length ? chipsFor(L.bin) : '<span class="chip" style="padding:4px 8px">Nothing. Use what is on the bench.</span>'}</div>
-    <div class="row"><button class="btn primary" data-act="close">Start building</button><button class="btn" data-act="levels">All puzzles</button></div>`,
+    <div class="note">${esc(L.brief)}<span class="sig">— O. Tannhjul, sjefsoppfinner</span></div>
+    <div class="eyebrow">Oppdrag</div><ul class="goals">${goals}</ul>
+    <div class="eyebrow" style="margin-top:14px">I delekassen</div><div class="chips">${Object.keys(L.bin).length ? chipsFor(L.bin) : '<span class="chip" style="padding:4px 8px">Ingenting. Bruk det som står på benken.</span>'}</div>
+    <div class="row"><button class="btn primary" data-act="close">Begynn å bygge</button><button class="btn" data-act="levels">Alle brett</button></div>`,
     { actions: { levels: showLevels } });
 }
 function starSvg(on, n) {
@@ -823,23 +1027,23 @@ function starSvg(on, n) {
 function showWin(stars, used) {
   const L = Game.L;
   const quips = [
-    'Magnificent. Utterly unnecessary, and magnificent.',
-    'The neighbours will talk. Let them.',
-    'I have filed this under "Triumphs, Improbable".',
-    'Not one sensible step in the whole sequence. Perfect.',
-    'Somewhere, a simple lever is weeping with envy.'
+    'Storartet. Helt unødvendig, og helt storartet.',
+    'Naboene kommer til å snakke om dette. La dem bare snakke!',
+    'Dette legger jeg i mappen «Triumfer, utrolige».',
+    'Ikke ett eneste fornuftig steg i hele greia. Perfekt.',
+    'Et sted sitter en helt vanlig spak og gråter av misunnelse.'
   ];
   const q = quips[(Game.levelIndex * 7 + used) % quips.length];
   const last = Game.levelIndex === LEVELS.length - 1;
-  openModal(`<div class="eyebrow">Work order complete</div><h2>${last ? 'The grand apparatus works!' : 'It works!'}</h2>
+  openModal(`<div class="eyebrow">Oppdraget er løst</div><h2>${last ? 'Det store apparatet virker!' : 'Det virker!'}</h2>
     <div class="stars">${[0, 1, 2].map(n => starSvg(n < stars, n)).join('')}</div>
     <ul class="stat-list">
-      <li><span class="k">Machine time</span><span>${(Game.winTime || 0).toFixed(1)} seconds</span></li>
-      <li><span class="k">Parts you added</span><span class="${used <= L.par ? 'y' : ''}">${used} (par ${L.par})${used <= L.par ? ' ★' : ''}</span></li>
-      <li><span class="k">Hints used</span><span class="${Game.hintsUsed === 0 ? 'y' : ''}">${Game.hintsUsed}${Game.hintsUsed === 0 ? ' ★' : ''}</span></li>
+      <li><span class="k">Maskintid</span><span>${(Game.winTime || 0).toFixed(1)} sekunder</span></li>
+      <li><span class="k">Deler du la til</span><span class="${used <= L.par ? 'y' : ''}">${used} (mål ${L.par})${used <= L.par ? ' ★' : ''}</span></li>
+      <li><span class="k">Tips brukt</span><span class="${Game.hintsUsed === 0 ? 'y' : ''}">${Game.hintsUsed}${Game.hintsUsed === 0 ? ' ★' : ''}</span></li>
     </ul>
-    <div class="note">${q}<span class="sig">— O. Gearwhistle</span></div>
-    <div class="row">${last ? '<button class="btn primary" data-act="sandbox">Open the free workshop</button>' : '<button class="btn primary" data-act="next">Next puzzle</button>'}<button class="btn" data-act="watch">Keep watching</button><button class="btn" data-act="levels">All puzzles</button></div>`,
+    <div class="note">${q}<span class="sig">— O. Tannhjul</span></div>
+    <div class="row">${last ? '<button class="btn primary" data-act="sandbox">Åpne det frie verkstedet</button>' : '<button class="btn primary" data-act="next">Neste brett</button>'}<button class="btn" data-act="watch">Se på maskinen</button><button class="btn" data-act="levels">Alle brett</button></div>`,
     { actions: { next: () => { closeModal(); loadLevel(Game.levelIndex + 1); }, watch: closeModal, levels: showLevels, sandbox: () => { closeModal(); loadLevel('sandbox'); } } });
 }
 function showLevels() {
@@ -847,41 +1051,52 @@ function showLevels() {
   const firstOpen = LEVELS.findIndex(L => !(prog[L.key]?.stars > 0));
   const cards = LEVELS.map((L, n) => {
     const s = prog[L.key]?.stars || 0;
-    return `<button class="lvl${n === firstOpen ? ' next' : ''}" data-act="lvl${n}"><span class="n">${String(n + 1).padStart(2, '0')}${n === firstOpen ? ' · up next' : ''}</span><span class="t">${esc(L.name)}</span><span class="s">${[0, 1, 2].map(k => `<span class="${k < s ? 'on' : ''}">★</span>`).join('')}</span></button>`;
+    return `<button class="lvl${n === firstOpen ? ' next' : ''}" data-act="lvl${n}"><span class="n">${String(n + 1).padStart(2, '0')}${n === firstOpen ? ' · neste' : ''}</span><span class="t">${esc(L.name)}</span><span class="s">${[0, 1, 2].map(k => `<span class="${k < s ? 'on' : ''}">★</span>`).join('')}</span></button>`;
   }).join('');
   const actions = { sandbox: () => { closeModal(); loadLevel('sandbox'); } };
   LEVELS.forEach((L, n) => { actions['lvl' + n] = () => { closeModal(); loadLevel(n); }; });
   const total = LEVELS.reduce((a, L) => a + (prog[L.key]?.stars || 0), 0);
-  openModal(`<div class="eyebrow">${total} of ${LEVELS.length * 3} stars collected</div><h2>Puzzles</h2>
-    <p>Each puzzle comes with a work order and a bin of parts. Solve it for one star, stay at or under par for a second, and skip the hints for a third.</p>
-    <div class="levels">${cards}<button class="lvl sandbox" data-act="sandbox"><span class="n">∞</span><span class="t">Free workshop</span><span class="s" style="color:var(--muted);letter-spacing:0;font-size:13px">every part, no rules</span></button></div>`,
+  openModal(`<div class="eyebrow">${total} av ${LEVELS.length * 3} stjerner</div><h2>Brett</h2>
+    <p>Hvert brett har et oppdrag og en kasse med deler. Løser du det, får du én stjerne. Bruker du ikke flere deler enn målet, får du to. Klarer du det uten tips, får du tre.</p>
+    <div class="levels">${cards}<button class="lvl sandbox" data-act="sandbox"><span class="n">∞</span><span class="t">Fritt verksted</span><span class="s" style="color:var(--muted);letter-spacing:0;font-size:13px">alle deler, ingen regler</span></button></div>`,
     { actions });
 }
 function showHelp() {
-  const gloss = PART_ORDER.map(id => `<span class="chip" title="${esc(PARTS[id].desc)}"><img alt="" src="${THUMBS[id] || ''}">${esc(PARTS[id].name)}</span>`).join('');
-  openModal(`<div class="eyebrow">Shop manual</div><h2>How to play</h2>
-    <p>Each puzzle sets a work order: ring a bell, pop a balloon, land a ball in a basket. Take parts from the bin, place them on the bench and press <b>Run</b>. Parts with a gold outline belong to the puzzle and cannot be moved. If the machine misbehaves, press <b>Reset</b>, adjust it and run it again.</p>
-    <h3>Controls</h3>
+  const gloss = PART_ORDER.map(id => `<button class="chip" data-part="${id}"><img alt="" src="${THUMBS[id] || ''}">${esc(PARTS[id].name)}</button>`).join('');
+  openModal(`<div class="eyebrow">Bruksanvisning</div><h2>Slik spiller du</h2>
+    <p>Hvert brett har et oppdrag: ring med bjella, sprekk ballongen eller få kula oppi kurven. Dra deler fra kassen ut på benken, og trykk <b>Start</b>. Deler med gul ramme hører til brettet og kan ikke flyttes. Gikk det galt? Trykk <b>Stopp</b>. Prikkene viser hvor tingene trillet. Endre litt og prøv igjen!</p>
+    <h3>Bygge</h3>
     <div class="keys">
-      <div class="k"><kbd>Click</kbd></div><span>Take a part from the bin, then click the bench to place it. Click a placed part to pick it up again.</span>
-      <div class="k"><kbd>R</kbd></div><span>Rotate the part you are holding, or the one under the cursor.</span>
-      <div class="k"><kbd>E</kbd> / <kbd>Q</kbd></div><span>Raise or lower the held part one level. Parts can float in mid-air, and objects drop when the machine starts.</span>
-      <div class="k"><kbd>C</kbd></div><span>Choose a wire colour. A pressure plate switches on every gadget with the same colour.</span>
-      <div class="k"><kbd>X</kbd> / <kbd>Del</kbd></div><span>Return a part to the bin.</span>
-      <div class="k"><kbd>Esc</kbd> / right-click</div><span>Put down what you are holding.</span>
-      <div class="k"><kbd>Space</kbd></div><span>Run or reset the machine.</span>
-      <div class="k"><kbd>V</kbd></div><span>Switch camera view. Front view gives the classic flat, side-on look.</span>
-      <div class="k"><kbd>H</kbd></div><span>Show a hint. Using one costs a star.</span>
-      <div class="k"><kbd>1</kbd>–<kbd>9</kbd></div><span>Take the part in that slot of the bin.</span>
-      <div class="k">Drag</div><span>Orbit the camera. Middle-drag or Shift-drag pans, and the wheel zooms. On touch, drag with one finger and pinch with two.</span>
+      <div class="k">Dra fra kassen</div><span>Dra en del ut på benken og slipp den der den skal stå. Du kan også trykke på delen i kassen og så på benken.</span>
+      <div class="k">Trykk på en del</div><span>Velger den. Den får en oransje ramme, og knappene <b>Snu</b>, <b>Opp</b>, <b>Ned</b> og <b>Fjern</b> virker på den.</span>
+      <div class="k">Dra en del</div><span>Flytter den. Dra den tilbake til kassen for å fjerne den.</span>
+      <div class="k">Opp og Ned</div><span>Løfter delen opp i lufta eller senker den. Ting kan sveve, og kuler faller når maskinen starter.</span>
+      <div class="k">Farge</div><span>En trykkplate slår på alle deler med samme farge.</span>
+      <div class="k">Angre</div><span>Går ett steg tilbake.</span>
+      <div class="k">Tips</div><span>En gul skygge viser hvor en del skal stå. Da får du én stjerne mindre.</span>
+      <div class="k">Se deg rundt</div><span>Dra med én finger på et tomt sted for å snu kameraet, og knip med to fingre for å zoome. Med mus: dra, og rull med hjulet.</span>
     </div>
-    <h3>The catalogue</h3><div class="chips">${gloss}</div>`);
+    <div class="kbd-help"><h3>Tastatur</h3>
+    <div class="keys">
+      <div class="k"><kbd>R</kbd></div><span>Snu delen du holder, eller den under musepekeren.</span>
+      <div class="k"><kbd>E</kbd> / <kbd>Q</kbd></div><span>Opp eller ned ett hakk.</span>
+      <div class="k"><kbd>C</kbd></div><span>Bytt farge på ledningen.</span>
+      <div class="k"><kbd>X</kbd> / <kbd>Del</kbd></div><span>Legg delen tilbake i kassen.</span>
+      <div class="k"><kbd>Z</kbd></div><span>Angre.</span>
+      <div class="k"><kbd>Esc</kbd> / høyreklikk</div><span>Legg fra deg det du holder.</span>
+      <div class="k"><kbd>Mellomrom</kbd></div><span>Start eller stopp maskinen.</span>
+      <div class="k"><kbd>V</kbd></div><span>Bytt kameravinkel. «Forfra» ser ut som en tegning fra siden.</span>
+      <div class="k"><kbd>H</kbd></div><span>Vis et tips.</span>
+      <div class="k"><kbd>1</kbd>–<kbd>9</kbd></div><span>Ta delen på den plassen i kassen.</span>
+    </div></div>
+    <h3>Delene</h3><p style="margin:0 0 6px;color:var(--muted)">Trykk på en del for å lese hva den gjør.</p><div class="chips">${gloss}</div>`);
+  $$('#modal .chip[data-part]').forEach(c => c.addEventListener('click', () => { const d = PARTS[c.dataset.part]; toast(`${d.name}: ${d.desc}`, '', 4200); }));
 }
-
 // ---------------------------------------------------------------------------
 //  Camera
 // ---------------------------------------------------------------------------
 const VIEWS = ['Angled', 'Front', 'Top', 'Side'];
+const VIEW_LABELS = { Angled: 'Skrå', Front: 'Forfra', Top: 'Ovenfra', Side: 'Fra siden' };
 let viewIdx = 0, camTween = null;
 function viewPose(name) {
   const W = BOARD.w, D = BOARD.d, H = BOARD.h;
@@ -904,7 +1119,7 @@ function viewPose(name) {
 }
 function homeCamera(instant) {
   viewIdx = 0;
-  $('#viewLabel').textContent = 'View';
+  $('#viewLabel').textContent = 'Visning';
   tweenTo(viewPose('Angled'), instant);
 }
 function tweenTo(p, instant) {
@@ -913,7 +1128,7 @@ function tweenTo(p, instant) {
 }
 function cycleView() {
   viewIdx = (viewIdx + 1) % VIEWS.length;
-  $('#viewLabel').textContent = VIEWS[viewIdx];
+  $('#viewLabel').textContent = VIEW_LABELS[VIEWS[viewIdx]];
   tweenTo(viewPose(VIEWS[viewIdx]));
   Sound.click();
 }
@@ -939,8 +1154,8 @@ function showTitle() {
   updateViewOffset();
   const prog = progress();
   const solved = LEVELS.filter(L => prog[L.key]?.stars > 0).length;
-  $('#titleSpec').textContent = `${LEVELS.length} puzzles · ${PART_ORDER.length} gadgets · ${solved ? solved + ' solved so far' : 'drag to look around'}`;
-  $('#playBtn').textContent = solved ? 'Continue tinkering' : 'Start tinkering';
+  $('#titleSpec').textContent = `${LEVELS.length} brett · ${PART_ORDER.length} deler · ${solved ? solved + ' løst så langt' : 'dra for å se deg rundt'}`;
+  $('#playBtn').textContent = solved ? 'Fortsett å bygge' : 'Begynn å bygge';
 }
 function startAttract() {
   stopAttract();
@@ -948,8 +1163,9 @@ function startAttract() {
   const L = SHOWCASE;
   Game.L = L; Game.levelIndex = null;
   clearInsts();
+  Trail.clear();
   BOARD.w = L.board[0]; BOARD.d = L.board[1]; BOARD.h = L.board[2];
-  buildSet('Improbable Apparatus');
+  buildSet('Det Utrolige Apparatet');
   makeFloorPick();
   for (const f of L.fixed) addInst(makeInst(f, true));
   if (guides) guides.visible = false;
@@ -1006,89 +1222,207 @@ function updateViewOffset() {
   camera.setViewOffset(w, h, ox, oy, w, h);
   camera.updateProjectionMatrix();
 }
+// A press on the bench means one of four things, decided when the finger/button goes down:
+//   look  - empty space or a puzzle part: drag orbits the camera, a tap clears the selection
+//   held  - a part is in hand: drag moves it, lifting the finger puts it down
+//   part  - one of your placed parts: a tap selects it, a drag picks it up and moves it
+//   bin   - a card in the parts bin: a drag carries the part out onto the bench
+// The handler runs in the capture phase on window, so it runs before OrbitControls and can
+// stop one finger from turning the camera while it is moving a part.
+function onPointerDown(e) {
+  setTouchUI(e.pointerType !== 'mouse');
+  if (e.isPrimary) activePointers.clear(); // a fresh touch sequence: forget any lost pointers
+  activePointers.add(e.pointerId);
+  if (activePointers.size > 1) { // a second finger: this is a pinch or a turn, not a placement
+    if (gesture) {
+      gesture.multi = true;
+      if (gesture.kind === 'part') gesture.kind = 'look';
+      if (gesture.kind === 'bin' && gesture.moved) $('#dragAvatar').hidden = true;
+      syncCamera();
+    }
+    return;
+  }
+  if (e.target !== canvas) return; // bin cards start their own gesture
+  ptr.down = true; ptr.moved = false; ptr.sx = e.clientX; ptr.sy = e.clientY; ptr.t = performance.now(); ptr.button = e.button;
+  ptr.x = e.clientX; ptr.y = e.clientY; ptr.inside = true;
+  camTween = null;
+  canvas.focus({ preventScroll: true });
+  gesture = { kind: 'look', id: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, multi: false, button: e.button, inst: null, touch: e.pointerType !== 'mouse' };
+  if (Game.mode !== 'edit' || e.button !== 0) return;
+  updatePointer(); // the held part jumps under the finger, or we find what was pressed
+  if (Game.held) gesture.kind = 'held';
+  else if (hoverInst) {
+    gesture.inst = hoverInst;
+    if (!hoverInst.fixed) { gesture.kind = 'part'; syncCamera(); }
+  }
+}
+function binPointerDown(e, type) {
+  if (Game.mode !== 'edit' || e.button !== 0 || activePointers.size > 1) return;
+  if (!(Game.bin[type] > 0)) return; // the click handler explains
+  gesture = { kind: 'bin', type, id: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, multi: false, button: 0, over: false, touch: e.pointerType !== 'mouse' };
+  ptr.x = e.clientX; ptr.y = e.clientY;
+  hideTip();
+}
+function onPointerMove(e) {
+  if (e.pointerType === 'mouse' && usingTouch) setTouchUI(false);
+  const g = gesture;
+  if (g && e.pointerId !== g.id) return; // other fingers belong to OrbitControls
+  ptr.x = e.clientX; ptr.y = e.clientY;
+  if (!g) { // plain mouse hover
+    if (e.target === canvas) { ptr.inside = true; updatePointer(); moveHoverLabel(); }
+    return;
+  }
+  if (!g.moved && Math.hypot(e.clientX - g.sx, e.clientY - g.sy) > (g.touch ? 10 : 5)) {
+    g.moved = true; ptr.moved = true;
+    if (!g.multi && Game.mode === 'edit') {
+      if (g.kind === 'part') { pickUp(g.inst); g.kind = Game.held ? 'held' : 'look'; }
+      else if (g.kind === 'bin') startBinDrag(g);
+    }
+  }
+  if (g.multi) return;
+  if (g.kind === 'bin') { if (g.moved) binDragMove(g, e); return; }
+  if (g.kind === 'held') { ptr.inside = true; updatePointer(); }
+}
+function overBin(x, y) { const el = document.elementFromPoint(x, y); return !!(el && el.closest('#bin')); }
+function onPointerUp(e) {
+  activePointers.delete(e.pointerId);
+  const g = gesture;
+  if (!g || e.pointerId !== g.id) return;
+  gesture = null;
+  ptr.down = false;
+  syncCamera();
+  if (g.kind === 'bin') { endBinDrag(g, e); return; }
+  if (g.multi || Game.mode !== 'edit') { updatePointer(); return; }
+  if (g.button === 2) { if (!g.moved && Game.held) cancelHeld(); updatePointer(); return; }
+  if (g.button !== 0) { updatePointer(); return; }
+  if (g.kind === 'held') {
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    updatePointer();
+    if (el === canvas) tryPlace();
+    else if (g.moved && Game.held?.from && el && el.closest('#bin')) returnToBin(null); // dragged back into the bin
+    else if (g.moved && Game.held?.from) cancelHeld(); // dropped on a panel: back where it was
+    updatePointer();
+    return;
+  }
+  if (g.moved) { updatePointer(); return; } // that was a camera drag
+  if (g.kind === 'part') select(g.inst);
+  else {
+    if (g.inst && g.inst.fixed) { Sound.nope(); toast(`${g.inst.def.name}: hører til brettet og står fast.`, 'warn', 2000); }
+    select(null);
+  }
+  updatePointer();
+}
+function onPointerCancel(e) {
+  activePointers.delete(e.pointerId);
+  const g = gesture;
+  if (!g || e.pointerId !== g.id) return;
+  gesture = null;
+  ptr.down = false;
+  $('#dragAvatar').hidden = true;
+  if (g.kind === 'bin' && g.moved) cancelHeld(true);
+  syncCamera();
+  updatePointer();
+}
+function startBinDrag(g) {
+  if (Game.held && !(Game.held.type === g.type && !Game.held.from)) cancelHeld(true);
+  if (!Game.held) holdFromBin(g.type);
+  if (!Game.held) { g.multi = true; return; }
+  lastBinDrag = performance.now();
+  const av = $('#dragAvatar');
+  av.src = THUMBS[g.type] || '';
+  av.hidden = false;
+}
+function binDragMove(g, e) {
+  const onCanvas = document.elementFromPoint(e.clientX, e.clientY) === canvas;
+  g.over = onCanvas;
+  ptr.inside = onCanvas; ptr.down = true;
+  const av = $('#dragAvatar');
+  av.hidden = onCanvas; // over the bench the real ghost takes over
+  if (!onCanvas) av.style.transform = `translate(${e.clientX - 42}px, ${e.clientY - 70}px)`;
+  updatePointer();
+}
+function endBinDrag(g, e) {
+  $('#dragAvatar').hidden = true;
+  if (!g.moved || g.multi) { if (g.moved) cancelHeld(true); updatePointer(); return; } // a plain tap: the click handler takes it
+  lastBinDrag = performance.now();
+  const onCanvas = document.elementFromPoint(e.clientX, e.clientY) === canvas;
+  updatePointer();
+  if (onCanvas && Game.held) tryPlace(); // if the spot is taken, the part stays in hand, shown red
+  else cancelHeld(true);
+  updatePointer();
+}
+function moveHoverLabel() {
+  if (hoverInst && !$('#hoverLabel').hidden) { const el = $('#hoverLabel'); el.style.left = ptr.x + 'px'; el.style.top = ptr.y + 'px'; }
+}
+function clearMine() {
+  if (Game.mode !== 'edit') return;
+  const mine = Game.insts.filter(x => !x.fixed);
+  if (!mine.length) { toast('Du har ikke satt ut noen deler ennå.', '', 1600); return; }
+  openModal(`<div class="eyebrow">Tøm benken</div><h2>Legge alt tilbake?</h2><p>Alle ${mine.length} delene du har satt ut, går tilbake i kassen. Brettets egne deler blir stående. Du kan angre etterpå.</p>
+    <div class="row"><button class="btn primary" data-act="yes">Tøm benken</button><button class="btn" data-act="close">Behold dem</button></div>`,
+    { actions: { yes: () => { cancelHeld(true); pushUndo(); for (const m of mine) returnToBin(m, { noUndo: true, silent: true }); Sound.remove(); closeModal(); } } });
+}
 function bindInput() {
   window.addEventListener('resize', onResize);
-  canvas.addEventListener('pointermove', (e) => {
-    ptr.x = e.clientX; ptr.y = e.clientY; ptr.inside = true;
-    if (ptr.down && Math.hypot(e.clientX - ptr.sx, e.clientY - ptr.sy) > 6) ptr.moved = true;
-    if (!ptr.down || Game.held) updatePointer();
-    if (hoverInst && !$('#hoverLabel').hidden) { const el = $('#hoverLabel'); el.style.left = ptr.x + 'px'; el.style.top = ptr.y + 'px'; }
-  });
-  canvas.addEventListener('pointerleave', () => { ptr.inside = false; updatePointer(); });
-  canvas.addEventListener('pointerdown', (e) => {
-    Sound.unlock();
-    ptr.down = true; ptr.moved = false; ptr.sx = e.clientX; ptr.sy = e.clientY; ptr.t = performance.now(); ptr.button = e.button;
-    ptr.x = e.clientX; ptr.y = e.clientY; ptr.inside = true;
-    camTween = null;
-    if (e.pointerType !== 'mouse') updatePointer();
-    canvas.focus({ preventScroll: true });
-  });
-  window.addEventListener('pointerup', (e) => {
-    if (!ptr.down) return;
-    ptr.down = false;
-    if (ptr.moved || performance.now() - ptr.t > 600 || e.target !== canvas) { updatePointer(); return; }
-    if (Game.mode !== 'edit') return;
-    if (ptr.button === 2) { if (Game.held) cancelHeld(); return; }
-    if (ptr.button !== 0) return;
-    updatePointer();
-    if (Game.held) tryPlace();
-    else if (hoverInst) {
-      if (hoverInst.fixed) { Sound.nope(); toast(`The ${hoverInst.def.name.toLowerCase()} is part of the puzzle and stays where it is.`, 'warn', 2000); }
-      else pickUp(hoverInst);
-    }
-  });
+  window.addEventListener('pointerdown', onPointerDown, true);
+  window.addEventListener('pointermove', onPointerMove, true);
+  window.addEventListener('pointerup', onPointerUp, true);
+  window.addEventListener('pointercancel', onPointerCancel, true);
+  canvas.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !gesture) { ptr.inside = false; updatePointer(); } });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   window.addEventListener('keydown', (e) => {
     if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
     if (Game.modalOpen) { if (e.key === 'Escape') closeModal(); return; }
     if (!$('#title').hidden) return;
     const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undo(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (k === ' ' || k === 'enter') { e.preventDefault(); toggleRun(); }
-    else if (k === 'r') rotateAction();
-    else if (k === 'e' || k === 'pageup') heightAction(1);
-    else if (k === 'q' || k === 'pagedown') heightAction(-1);
-    else if (k === 'c') wireAction();
-    else if (k === 'x' || k === 'delete' || k === 'backspace') { e.preventDefault(); returnToBin(Game.held ? null : hoverInst); }
-    else if (k === 'escape') cancelHeld();
+    else if (k === 'r') rotateAction(true);
+    else if (k === 'e' || k === 'pageup') heightAction(1, true);
+    else if (k === 'q' || k === 'pagedown') heightAction(-1, true);
+    else if (k === 'c') wireAction(true);
+    else if (k === 'z') undo();
+    else if (k === 'x' || k === 'delete' || k === 'backspace') { e.preventDefault(); if (Game.held) returnToBin(null); else { const t = toolTarget(true); if (t) returnToBin(t); else nothingSelected(); } }
+    else if (k === 'escape') { if (Game.held) cancelHeld(); else select(null); }
     else if (k === 'h') showHint();
     else if (k === 'v') cycleView();
     else if (/^[1-9]$/.test(k)) { const t = binTypes()[+k - 1]; if (t) holdFromBin(t); }
   });
-  $('#runBtn').addEventListener('click', () => { Sound.unlock(); toggleRun(); });
-  $('#rotBtn').addEventListener('click', rotateAction);
-  $('#upBtn').addEventListener('click', () => heightAction(1));
-  $('#downBtn').addEventListener('click', () => heightAction(-1));
-  $('#wireBtn').addEventListener('click', wireAction);
+  $('#runBtn').addEventListener('click', toggleRun);
+  $('#rotBtn').addEventListener('click', () => rotateAction(false));
+  $('#upBtn').addEventListener('click', () => heightAction(1, false));
+  $('#downBtn').addEventListener('click', () => heightAction(-1, false));
+  $('#wireBtn').addEventListener('click', () => wireAction(false));
   $('#delBtn').addEventListener('click', () => {
     if (Game.held) returnToBin(null);
-    else if (hoverInst) returnToBin(hoverInst);
-    else toast('Hover over a part you placed, then press X to send it back to the bin.', '', 2200);
+    else if (selInst) returnToBin(selInst);
+    else nothingSelected();
   });
+  $('#undoBtn').addEventListener('click', undo);
   $('#hintBtn').addEventListener('click', showHint);
   $('#viewBtn').addEventListener('click', cycleView);
-  $('#clearBtn').addEventListener('click', () => {
-    if (Game.mode !== 'edit') return;
-    const mine = Game.insts.filter(x => !x.fixed);
-    if (!mine.length) { toast('Nothing of yours on the bench yet.', '', 1600); return; }
-    openModal(`<div class="eyebrow">Clear the bench</div><h2>Put everything back?</h2><p>All ${mine.length} parts you placed go back into the bin. Puzzle parts stay where they are.</p>
-      <div class="row"><button class="btn primary" data-act="yes">Clear my parts</button><button class="btn" data-act="close">Keep them</button></div>`,
-      { actions: { yes: () => { cancelHeld(true); for (const m of mine) returnToBin(m); closeModal(); } } });
-  });
+  $('#clearBtn').addEventListener('click', clearMine);
   $$('#speed button').forEach(b => b.addEventListener('click', () => {
     Game.speed = +b.dataset.s;
     $$('#speed button').forEach(x => x.classList.toggle('on', x === b));
   }));
   const sb = $('#soundBtn');
   sb.classList.toggle('off', Sound.muted);
-  sb.addEventListener('click', () => { Sound.unlock(); Sound.setMuted(!Sound.muted); sb.classList.toggle('off', Sound.muted); });
+  sb.addEventListener('click', () => { Sound.setMuted(!Sound.muted); sb.classList.toggle('off', Sound.muted); Sound.click(); });
+  const mb = $('#musicBtn');
+  mb.classList.toggle('off', Sound.musicOff);
+  mb.addEventListener('click', () => { Sound.setMusic(Sound.musicOff); mb.classList.toggle('off', Sound.musicOff); });
   $('#helpBtn').addEventListener('click', showHelp);
   $('#levelsBtn').addEventListener('click', showLevels);
   $('#brandBtn').addEventListener('click', showTitle);
-  $('#playBtn').addEventListener('click', () => { Sound.unlock(); Sound.click(); continueGame(); });
-  $('#puzzlesBtn').addEventListener('click', () => { Sound.unlock(); Sound.click(); showLevels(); });
-  $('#sandboxBtn').addEventListener('click', () => { Sound.unlock(); Sound.click(); loadLevel('sandbox'); });
-  $('#howBtn').addEventListener('click', () => { Sound.unlock(); Sound.click(); showHelp(); });
+  $('#playBtn').addEventListener('click', () => { Sound.click(); continueGame(); });
+  $('#puzzlesBtn').addEventListener('click', () => { Sound.click(); showLevels(); });
+  $('#sandboxBtn').addEventListener('click', () => { Sound.click(); loadLevel('sandbox'); });
+  $('#howBtn').addEventListener('click', () => { Sound.click(); showHelp(); });
   $('#modalWrap').addEventListener('pointerdown', (e) => { if (e.target.id === 'modalWrap') closeModal(); });
+  setTouchUI(usingTouch);
+  syncCamera();
 }
 
 // ---------------------------------------------------------------------------
@@ -1104,7 +1438,7 @@ function frame(now) {
     Game.acc += dt * (Game.attract ? 1 : Game.speed);
     const maxN = Math.ceil(10 * (Game.attract ? 1 : Game.speed));
     let n = 0;
-    while (Game.acc >= DT && n < maxN && sim.time < MAX_RUN_TIME + 5) { sim.step(); Game.acc -= DT; n++; }
+    while (Game.acc >= DT && n < maxN && sim.time < MAX_RUN_TIME + 5) { sim.step(); if (!Game.attract) Trail.record(sim); Game.acc -= DT; n++; }
     if (n >= maxN) Game.acc = 0;
     sim.sync();
     sim.fxFrame(dt);
@@ -1151,6 +1485,7 @@ function headlessRun(L, specs, maxT = 40, jitter = 0, seed = 1) {
 }
 window.__IA = {
   get levels() { return LEVELS; }, SANDBOX, SHOWCASE, PARTS, Game, Sim, makeInst, BOARD, CANNON, loadLevel, headlessRun, showTitle, startRun, stopRun, camera, controls,
+  get trailDots() { return Trail.count; }, get ghostCell() { return ghost && ghost.cell; }, get selected() { return selInst && [selInst.type, selInst.i, selInst.j, selInst.k, selInst.r]; }, get undoDepth() { return undoStack.length; }, Sound,
   place(spec) { const inst = makeInst(spec, false); addInst(inst); return inst.id; },
   tweenTo(pos, target) { tweenTo({ pos: new THREE.Vector3(...pos), target: new THREE.Vector3(...target) }, true); },
   applySolution() {

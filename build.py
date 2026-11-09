@@ -29,7 +29,7 @@ def main():
     content = f"{head}\n{body}\n{IMPORTMAP}\n{script}\n"
     (ROOT / "artifact.html").write_text(content)
     standalone = (
-        '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        '<!doctype html>\n<html lang="nb">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
         f"{head}\n</head>\n<body>\n{body}\n{IMPORTMAP}\n{script}\n</body>\n</html>\n"
     )

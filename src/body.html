@@ -1,30 +1,33 @@
-<canvas id="scene" tabindex="0" aria-label="3D workbench"></canvas>
+<canvas id="scene" tabindex="0" aria-label="3D-arbeidsbenk"></canvas>
 
 <div id="hud" hidden>
   <div class="top-left">
-    <button class="brand" id="brandBtn" title="Main menu">The Improbable <span>Apparatus</span></button>
+    <button class="brand" id="brandBtn" title="Hovedmeny">Det Utrolige <span>Apparatet</span></button>
     <div class="level-name" id="levelName"></div>
   </div>
 
   <div class="workorder paper" id="workorder">
-    <div class="eyebrow"><span>Work order</span><span id="woStatus">Not yet running</span></div>
+    <div class="eyebrow"><span>Oppdrag</span><span id="woStatus">Ikke startet</span></div>
     <ul class="goals" id="goals"></ul>
   </div>
 
   <div class="top-right">
-    <button class="icon-btn paper" id="levelsBtn" title="Puzzles" aria-label="Puzzles">
+    <button class="icon-btn paper" id="levelsBtn" title="Brett" aria-label="Brett">
       <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
     </button>
-    <button class="icon-btn paper" id="soundBtn" title="Sound on/off" aria-label="Sound on or off">
+    <button class="icon-btn paper" id="musicBtn" title="Musikk av/på" aria-label="Musikk av eller på">
+      <svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/><path class="mute" d="M3 3l18 18"/></svg>
+    </button>
+    <button class="icon-btn paper" id="soundBtn" title="Lydeffekter av/på" aria-label="Lydeffekter av eller på">
       <svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path class="mute" d="M17 9l5 6M22 9l-5 6"/></svg>
     </button>
-    <button class="icon-btn paper" id="helpBtn" title="How to play" aria-label="How to play">
+    <button class="icon-btn paper" id="helpBtn" title="Slik spiller du" aria-label="Slik spiller du">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.8"/><path d="M12 17.2v.1"/></svg>
     </button>
   </div>
 
-  <aside class="bin paper" id="bin" aria-label="Parts bin">
-    <div class="bin-head"><span class="stencil">Parts bin</span><span class="eyebrow" id="binCount"></span></div>
+  <aside class="bin paper" id="bin" aria-label="Delekasse">
+    <div class="bin-head"><span class="stencil">Delekasse</span><span class="eyebrow" id="binCount"></span></div>
     <div class="bin-list" id="binList"></div>
   </aside>
 
@@ -32,36 +35,38 @@
 
   <div class="dock paper" id="dock">
     <div class="tools">
-      <button class="tool" id="rotBtn" title="Rotate (R)"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span>Rotate</span><kbd>R</kbd></button>
-      <button class="tool" id="upBtn" title="Raise (E)"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg><span>Raise</span><kbd>E</kbd></button>
-      <button class="tool" id="downBtn" title="Lower (Q)"><svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg><span>Lower</span><kbd>Q</kbd></button>
-      <button class="tool" id="wireBtn" title="Wire colour (C)"><div class="chdot" id="wireDot"></div><span>Wire</span><kbd>C</kbd></button>
-      <button class="tool" id="delBtn" title="Back to bin (X)"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg><span>Remove</span><kbd>X</kbd></button>
+      <button class="tool" id="rotBtn" title="Snu (R)"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span>Snu</span><kbd>R</kbd></button>
+      <button class="tool" id="upBtn" title="Opp (E)"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg><span>Opp</span><kbd>E</kbd></button>
+      <button class="tool" id="downBtn" title="Ned (Q)"><svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg><span>Ned</span><kbd>Q</kbd></button>
+      <button class="tool" id="wireBtn" title="Ledningsfarge (C)"><div class="chdot" id="wireDot"></div><span>Farge</span><kbd>C</kbd></button>
+      <button class="tool" id="delBtn" title="Tilbake i kassen (X)"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg><span>Fjern</span><kbd>X</kbd></button>
       <div class="sep"></div>
-      <button class="tool" id="hintBtn" title="Hint (H)"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span>Hint</span><kbd>H</kbd></button>
-      <button class="tool" id="viewBtn" title="Camera view (V)"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5-9 5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg><span id="viewLabel">View</span><kbd>V</kbd></button>
-      <button class="tool" id="clearBtn" title="Clear my parts"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span>Clear</span><kbd>&nbsp;</kbd></button>
+      <button class="tool" id="undoBtn" title="Angre (Z)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><span>Angre</span><kbd>Z</kbd></button>
+      <button class="tool" id="hintBtn" title="Tips (H)"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span>Tips</span><kbd>H</kbd></button>
+      <button class="tool" id="viewBtn" title="Kameravinkel (V)"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5-9 5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg><span id="viewLabel">Visning</span><kbd>V</kbd></button>
+      <button class="tool" id="clearBtn" title="Fjern alle delene mine"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span>Tøm</span><kbd>&nbsp;</kbd></button>
     </div>
-    <div class="speed" id="speed"><button data-s="1" class="on">1×</button><button data-s="3">3×</button></div>
-    <button class="run-btn" id="runBtn"><svg viewBox="0 0 24 24" id="runIcon"><path d="M7 4l13 8-13 8z"/></svg><span id="runLabel">Run</span></button>
+    <div class="speed" id="speed"><button data-s="1" class="on" aria-label="Vanlig fart">1×</button><button data-s="3" aria-label="Tre ganger så fort">3×</button></div>
+    <button class="run-btn" id="runBtn"><svg viewBox="0 0 24 24" id="runIcon"><path d="M7 4l13 8-13 8z"/></svg><span id="runLabel">Start</span></button>
   </div>
 </div>
 
 <div id="tip" class="paper" hidden></div>
 <div id="hoverLabel" hidden></div>
+<img id="dragAvatar" alt="" hidden>
 <div id="toast" class="paper"></div>
 <div id="flash"></div>
 
 <section id="title" hidden>
   <div class="inner">
-    <div class="eyebrow">A chain-reaction workshop · Drawing IA-01</div>
-    <h1>The Improbable <span class="amp">Apparatus</span></h1>
-    <p class="tag">Ramps, fans, dominoes, magnets, balloons and one very patient bowling ball. Build a ridiculous machine in 3D, pull the lever and watch it go.</p>
+    <div class="eyebrow">Et kjedereaksjonsverksted · Tegning DUA-01</div>
+    <h1>Det Utrolige <span class="amp">Apparatet</span></h1>
+    <p class="tag">Ramper, vifter, dominobrikker, magneter, ballonger og ei veldig tålmodig bowlingkule. Bygg en vill maskin i 3D, trykk Start og se den gå!</p>
     <div class="menu">
-      <button class="btn primary" id="playBtn">Start tinkering</button>
-      <button class="btn" id="puzzlesBtn">Choose a puzzle</button>
-      <button class="btn" id="sandboxBtn">Free workshop</button>
-      <button class="btn" id="howBtn">How to play</button>
+      <button class="btn primary" id="playBtn">Begynn å bygge</button>
+      <button class="btn" id="puzzlesBtn">Velg et brett</button>
+      <button class="btn" id="sandboxBtn">Fritt verksted</button>
+      <button class="btn" id="howBtn">Slik spiller du</button>
     </div>
     <div class="foot spec" id="titleSpec"></div>
   </div>
