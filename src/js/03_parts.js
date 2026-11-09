@@ -92,8 +92,8 @@ function prismGeo(points, depth) {
 //  STRUCTURE
 // ============================================================================
 defPart('block', {
-  name: 'Toy Block', cat: 'Structure', blocksWind: true,
-  desc: 'A solid wooden block. Stack it, build walls and towers, or block the wind.',
+  name: 'Kloss', cat: 'Bygg', blocksWind: true,
+  desc: 'En solid trekloss. Bygg tårn og vegger med den, eller stopp vinden.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gRBox(0.98, 0.98, 0.98, 0.06), letterMat(hashId(inst.id)), 0, 0.49, 0));
@@ -103,8 +103,8 @@ defPart('block', {
 });
 
 defPart('platform', {
-  name: 'Shelf', cat: 'Structure',
-  desc: 'A thin floating shelf. Its top is the floor of the cell it sits in.',
+  name: 'Hylle', cat: 'Bygg',
+  desc: 'En tynn hylle som svever i lufta. Ting kan ligge oppå den.',
   build() {
     const g = new THREE.Group();
     g.add(mk(gRBox(1, 0.08, 1, 0.025), MAT.plank, 0, -0.04, 0));
@@ -117,8 +117,8 @@ defPart('platform', {
 const RAMP_A = Math.atan2(1, 2), RAMP_L = Math.sqrt(5);
 const RAMP_N = new THREE.Vector2(Math.sin(RAMP_A), Math.cos(RAMP_A));
 defPart('ramp', {
-  name: 'Ramp', cat: 'Structure', cells: [[0, 0, 0], [1, 0, 0]],
-  desc: 'Drops one level over two cells. Chain ramps nose-to-tail for a long, smooth run.',
+  name: 'Rampe', cat: 'Bygg', cells: [[0, 0, 0], [1, 0, 0]],
+  desc: 'Går ett hakk ned over to ruter. Sett flere ramper etter hverandre for en lang bakke.',
   build() {
     const g = new THREE.Group();
     const wedge = mk(prismGeo([[-0.5, 0], [1.45, 0], [-0.5, 0.975]], 0.88), MAT.woodMid); // tucked under the plank (no z-fighting)
@@ -144,8 +144,8 @@ defPart('ramp', {
 
 const CURVE_R = 0.72;
 defPart('curve', {
-  name: 'Curved Rail', cat: 'Structure',
-  desc: 'Turns a rolling ball through 90°. Works in either direction.',
+  name: 'Svingskinne', cat: 'Bygg',
+  desc: 'Får en kule som triller, til å svinge. Den virker begge veier.',
   build() {
     const g = new THREE.Group();
     g.add(mk(gBox(1, 0.05, 1), MAT.plank, 0, -0.022, 0));
@@ -189,8 +189,8 @@ defPart('curve', {
 });
 
 defPart('funnel', {
-  name: 'Funnel', cat: 'Structure',
-  desc: 'Catches anything that falls in and drops it out of the bottom, dead centre. Beach balls are too big to fit.',
+  name: 'Trakt', cat: 'Bygg',
+  desc: 'Fanger det som faller oppi, og slipper det ut rett under. Badeballen er for stor.',
   build() {
     const g = new THREE.Group();
     const m = cachedGeo('funnelmat', () => { const mm = MAT.copper.clone(); mm.side = THREE.DoubleSide; return mm; });
@@ -234,8 +234,8 @@ defPart('funnel', {
 //  BOUNCERS
 // ============================================================================
 defPart('trampoline', {
-  name: 'Trampoline', cat: 'Bouncers',
-  desc: 'Throws anything that lands on it back up — about as high as it fell from.',
+  name: 'Trampoline', cat: 'Sprett',
+  desc: 'Spretter ting opp igjen, nesten like høyt som de falt fra.',
   build(inst) {
     const g = new THREE.Group();
     for (const [x, z] of [[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]]) g.add(mk(gCyl(0.04, 0.05, 0.2, 8), MAT.darkMetal, x, 0.1, z));
@@ -266,8 +266,8 @@ defPart('trampoline', {
 });
 
 defPart('bumper', {
-  name: 'Kicker', cat: 'Bouncers', blocksWind: true,
-  desc: 'A pinball kicker. Anything that touches it gets booted toward the arrow at speed, whichever way it came from.',
+  name: 'Sparker', cat: 'Sprett', blocksWind: true,
+  desc: 'Sparker alt som treffer den, i full fart dit pila peker.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gCyl(0.38, 0.42, 0.12, 28), MAT.darkMetal, 0, 0.06, 0));
@@ -314,7 +314,7 @@ defPart('bumper', {
 // ============================================================================
 function defBall(id, o) {
   defPart(id, {
-    name: o.name, cat: 'Objects', dynamic: true, center: [0, o.r, 0], desc: o.desc,
+    name: o.name, the: o.the, cat: 'Ting', dynamic: true, center: [0, o.r, 0], desc: o.desc,
     build() {
       const g = new THREE.Group();
       g.add(mk(gSphere(o.r, 36, 24), o.mat()));
@@ -328,14 +328,14 @@ function defBall(id, o) {
     }
   });
 }
-defBall('bowling', { name: 'Bowling Ball', r: 0.24, mass: 4, roll: 0.32, pmat: 'bowling', snd: 'heavy', mat: () => MAT.bowling, desc: 'Heavy and stubborn. Barely bounces, shrugs off wind, and flattens anything in its way.' });
-defBall('rubber', { name: 'Rubber Ball', r: 0.17, mass: 0.35, roll: 0.45, pmat: 'rubber', snd: 'rubber', mat: () => MAT.rubberBall, desc: 'Light and very bouncy.' });
-defBall('marble', { name: 'Steel Ball', r: 0.14, mass: 0.9, roll: 0.25, pmat: 'steel', snd: 'metal', magnetic: true, mat: () => MAT.chrome, desc: 'A small, dense steel ball. Magnets pull it in.' });
-defBall('beach', { name: 'Beach Ball', r: 0.36, mass: 0.12, pmat: 'beach', snd: 'soft', angDamp: 0.3, linDamp: 0.4, roll: 0.7, mat: () => MAT.beach, desc: 'Big and feather-light. Fans push it a long way. Too big for funnels.' });
+defBall('bowling', { name: 'Bowlingkule', the: 'bowlingkula', r: 0.24, mass: 4, roll: 0.32, pmat: 'bowling', snd: 'heavy', mat: () => MAT.bowling, desc: 'Tung og sta. Den spretter nesten ikke, vinden rikker den ikke, og den velter alt i veien.' });
+defBall('rubber', { name: 'Sprettball', the: 'sprettballen', r: 0.17, mass: 0.35, roll: 0.45, pmat: 'rubber', snd: 'rubber', mat: () => MAT.rubberBall, desc: 'Lett og veldig sprett.' });
+defBall('marble', { name: 'Stålkule', the: 'stålkula', r: 0.14, mass: 0.9, roll: 0.25, pmat: 'steel', snd: 'metal', magnetic: true, mat: () => MAT.chrome, desc: 'En liten, tung kule av stål. Magneter drar i den.' });
+defBall('beach', { name: 'Badeball', the: 'badeballen', r: 0.36, mass: 0.12, pmat: 'beach', snd: 'soft', angDamp: 0.3, linDamp: 0.4, roll: 0.7, mat: () => MAT.beach, desc: 'Stor og lett som en fjær. Vifter blåser den langt. Den er for stor for trakter.' });
 
 defPart('domino', {
-  name: 'Domino', cat: 'Objects', dynamic: true, cells: [[0, 0, 0], [0, 1, 0]], center: [0, 0.8, 0],
-  desc: 'Stand them in a row one cell apart and topple the first one. Falls along its facing.',
+  name: 'Dominobrikke', the: 'dominobrikken', cat: 'Ting', dynamic: true, cells: [[0, 0, 0], [0, 1, 0]], center: [0, 0.8, 0],
+  desc: 'Sett dem på rad med én rute mellom, og velt den første. Den faller den veien den peker.',
   build() {
     const g = new THREE.Group();
     const m = MAT.dominoSide;
@@ -365,15 +365,15 @@ defPart('domino', {
 });
 
 defPart('crate', {
-  name: 'Cardboard Box', cat: 'Objects', dynamic: true, center: [0, 0.4, 0],
-  desc: 'A light box. It slides, tumbles and catches the wind.',
+  name: 'Pappeske', the: 'pappesken', cat: 'Ting', dynamic: true, center: [0, 0.4, 0],
+  desc: 'En lett eske. Den sklir, velter og blir tatt av vinden.',
   build() { const g = new THREE.Group(); g.add(mk(gRBox(0.8, 0.8, 0.8, 0.03), MAT.crate)); return g; },
   physics(inst, sim) { sim.dynBody(inst, { shapes: [{ s: BOX(0.4, 0.4, 0.4) }], mass: 0.25, mat: 'crate', snd: 'soft', windArea: 0.64 }); }
 });
 
 defPart('balloon', {
-  name: 'Balloon', cat: 'Objects', dynamic: true, center: [0, 0.5, 0],
-  desc: 'Floats upward. Pops on pins and cactus spines. Blows around easily.',
+  name: 'Ballong', the: 'ballongen', cat: 'Ting', dynamic: true, center: [0, 0.5, 0],
+  desc: 'Flyter oppover. Sprekker på spiker og kaktus, og blåser lett av gårde.',
   build() {
     const g = new THREE.Group();
     const b = mk(gSphere(0.28, 32, 24), MAT.balloon); b.scale.set(1, 1.16, 1);
@@ -398,8 +398,8 @@ defPart('balloon', {
 //  MACHINES
 // ============================================================================
 defPart('seesaw', {
-  name: 'Seesaw', cat: 'Machines', cells: [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
-  desc: 'Starts tipped toward its first cell. Drop something heavy on the high end and whatever sits in the low end goes flying. Balls dropped onto either end land in its cups.',
+  name: 'Dumphuske', cat: 'Maskiner', cells: [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+  desc: 'Slipp noe tungt på den høye enden, så flyr det som ligger på den lave enden. Kuler lander i koppene.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(prismGeo([[-0.28, 0], [0.28, 0], [0, 0.45]], 0.42), MAT.red, 1, 0, 0));
@@ -435,8 +435,8 @@ const SEESAW_COM = 0.15; // centre of mass sits this far toward the resting end
 function dominoUp(b) { const q = b.quaternion; return 1 - 2 * (q.x * q.x + q.z * q.z); }
 
 defPart('conveyor', {
-  name: 'Conveyor Belt', cat: 'Machines', cells: [[0, 0, 0], [1, 0, 0]], channel: 'device',
-  desc: 'Carries whatever lands on it toward the arrow, and grips well enough to take things on from the side. Runs all the time unless it is wired to a coloured plate.',
+  name: 'Transportbånd', art: 'et', cat: 'Maskiner', cells: [[0, 0, 0], [1, 0, 0]], channel: 'device',
+  desc: 'Frakter ting dit pila peker. Går hele tiden, med mindre den har fått farge. Da starter den når trykkplaten med samme farge blir trykket.',
   build(inst) {
     const g = new THREE.Group();
     const tex = TEX.belt.clone(); tex.needsUpdate = true;
@@ -486,8 +486,8 @@ defPart('conveyor', {
 });
 
 defPart('fan', {
-  name: 'Desk Fan', cat: 'Machines', channel: 'device', blocksWind: true,
-  desc: 'Blows light things away along its facing, up to 7 cells. Blocks stop the wind. Runs all the time unless wired to a coloured button.',
+  name: 'Vifte', cat: 'Maskiner', channel: 'device', blocksWind: true,
+  desc: 'Blåser lette ting bort, opptil 7 ruter. Klosser stopper vinden. Går hele tiden, med mindre den har fått farge.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gCyl(0.3, 0.34, 0.08, 24), MAT.darkMetal, -0.1, 0.04, 0));
@@ -574,8 +574,8 @@ defPart('fan', {
 });
 
 defPart('ram', {
-  name: 'Spring Ram', cat: 'Machines', channel: 'device',
-  desc: 'Punches one cell forward. Fires once, half a second after the start, or when its coloured button is pressed.',
+  name: 'Fjærstøter', cat: 'Maskiner', channel: 'device',
+  desc: 'Dytter én rute fram. Smeller et halvt sekund etter start, eller når trykkplaten med samme farge blir trykket.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gRBox(0.6, 0.12, 0.7, 0.03), MAT.darkMetal, -0.15, 0.06, 0));
@@ -633,8 +633,8 @@ function ramRod(inst, padX) {
 }
 
 defPart('magnet', {
-  name: 'Horseshoe Magnet', cat: 'Machines', channel: 'device', blocksWind: true,
-  desc: 'Pulls steel balls toward its open end, from up to 4 cells away. Always on unless wired to a coloured button.',
+  name: 'Magnet', cat: 'Maskiner', channel: 'device', blocksWind: true,
+  desc: 'Drar stålkuler mot seg fra opptil 4 ruter unna. Alltid på, med mindre den har fått farge.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gRBox(0.6, 0.1, 0.6, 0.03), MAT.darkMetal, -0.1, 0.05, 0));
@@ -691,8 +691,8 @@ defPart('magnet', {
 });
 
 defPart('button', {
-  name: 'Pressure Plate', cat: 'Machines', channel: 'switch', defaultCh: 'red',
-  desc: 'When something lands on it, it switches on every gadget wired to the same colour. Stays on once pressed.',
+  name: 'Trykkplate', cat: 'Maskiner', channel: 'switch', defaultCh: 'red',
+  desc: 'Når noe lander på den, slås alt med samme farge på.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gRBox(0.9, 0.08, 0.9, 0.03), MAT.darkMetal, 0, 0.04, 0));
@@ -721,8 +721,8 @@ defPart('button', {
 //  HAZARDS
 // ============================================================================
 defPart('pins', {
-  name: 'Pin Board', cat: 'Hazards', blocksWind: false,
-  desc: 'A board studded with downward nails, mounted at the top of its cell. Pops balloons that float up into it.',
+  name: 'Spikerbrett', art: 'et', cat: 'Spisse ting', blocksWind: false,
+  desc: 'Et brett med spiker som peker ned. Ballonger som flyr opp i det, sprekker.',
   build() {
     const g = new THREE.Group();
     g.add(mk(gRBox(0.96, 0.1, 0.96, 0.02), MAT.woodDark, 0, 0.93, 0));
@@ -742,8 +742,8 @@ defPart('pins', {
 });
 
 defPart('cactus', {
-  name: 'Potted Cactus', cat: 'Hazards', blocksWind: true,
-  desc: 'Prickly all over, pot included. Pops any balloon that touches it.',
+  name: 'Kaktus', cat: 'Spisse ting', blocksWind: true,
+  desc: 'Stikker overalt, potta også. Ballonger som kommer borti den, sprekker.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gCyl(0.26, 0.2, 0.34, 20), MAT.terracotta, 0, 0.17, 0));
@@ -776,8 +776,8 @@ defPart('cactus', {
 //  GOALS
 // ============================================================================
 defPart('bell', {
-  name: 'Brass Bell', cat: 'Goals', blocksWind: false,
-  desc: 'Rings when something knocks it hard enough. It hangs low, so rolling balls, flying balls and falling dominoes can all reach it.',
+  name: 'Bjelle', cat: 'Mål', blocksWind: false,
+  desc: 'Ringer når noe dunker borti den. Den henger lavt, så både kuler og dominobrikker når den.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gRBox(0.86, 0.08, 0.62, 0.03), MAT.woodDark, -0.04, 0.04, 0));
@@ -827,8 +827,8 @@ defPart('bell', {
 });
 
 defPart('basket', {
-  name: 'Basket', cat: 'Goals',
-  desc: 'A slatted wooden basket. Goals ask for a particular object to land inside and stay there.',
+  name: 'Kurv', cat: 'Mål',
+  desc: 'En kurv av tre. Oppdraget er å få en bestemt ting til å lande oppi.',
   build() {
     const g = new THREE.Group();
     g.add(mk(gBox(0.92, 0.05, 0.92), MAT.woodDark, 0, 0.025, 0));
@@ -850,8 +850,8 @@ defPart('basket', {
 });
 
 defPart('lamp', {
-  name: 'Light Bulb', cat: 'Goals', channel: 'switch', defaultCh: 'red', blocksWind: true,
-  desc: 'Lights up when a pressure plate of its colour is pressed.',
+  name: 'Lyspære', cat: 'Mål', channel: 'switch', defaultCh: 'red', blocksWind: true,
+  desc: 'Lyser når trykkplaten med samme farge blir trykket.',
   build(inst) {
     const g = new THREE.Group();
     g.add(mk(gCyl(0.3, 0.34, 0.1, 24), MAT.woodDark, 0, 0.05, 0));

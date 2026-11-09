@@ -8,7 +8,7 @@ try {
 } catch (e) {
   const msg = document.createElement('div');
   msg.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;padding:24px;text-align:center;font:600 18px/1.5 var(--font-body);color:var(--chalk);background:var(--ink)';
-  msg.textContent = 'The Improbable Apparatus needs WebGL, and this browser could not start it. Try another browser, or turn on hardware acceleration.';
+  msg.textContent = 'Det Utrolige Apparatet trenger WebGL, og denne nettleseren klarte ikke å starte det. Prøv en annen nettleser, eller slå på maskinvareakselerasjon.';
   document.body.appendChild(msg);
   throw e;
 }
@@ -222,7 +222,7 @@ function initTextures() {
     g.fillStyle = 'rgba(232,206,150,0.85)'; g.fillRect(w * 0.42, 0, w * 0.16, h); // tape
     g.strokeStyle = 'rgba(70,40,15,0.6)'; g.lineWidth = 4; g.strokeRect(6, 6, w - 12, h - 12);
     g.fillStyle = 'rgba(60,35,15,0.7)'; g.font = '800 28px "Big Shoulders Stencil Display", Impact, sans-serif';
-    g.textAlign = 'center'; g.fillText('THIS SIDE UP', w / 2, h * 0.22);
+    g.textAlign = 'center'; g.fillText('DENNE SIDEN OPP', w / 2, h * 0.22);
     g.beginPath(); g.moveTo(w * 0.3, h * 0.7); g.lineTo(w * 0.3, h * 0.42); g.lineTo(w * 0.22, h * 0.5); g.moveTo(w * 0.3, h * 0.42); g.lineTo(w * 0.38, h * 0.5);
     g.moveTo(w * 0.7, h * 0.7); g.lineTo(w * 0.7, h * 0.42); g.lineTo(w * 0.62, h * 0.5); g.moveTo(w * 0.7, h * 0.42); g.lineTo(w * 0.78, h * 0.5);
     g.lineWidth = 7; g.strokeStyle = 'rgba(60,35,15,0.7)'; g.stroke();
@@ -368,9 +368,9 @@ function buildSet(levelTitle) {
     g.beginPath(); g.arc(300, 214, 22, 0, TAU); g.stroke();
     g.setLineDash([6, 6]); g.beginPath(); g.moveTo(300, 214); g.lineTo(300, 300); g.lineTo(470, 300); g.stroke(); g.setLineDash([]);
     g.fillStyle = 'rgba(255,255,255,0.9)'; g.font = '800 30px "Big Shoulders Stencil Display", Impact, sans-serif';
-    g.fillText((levelTitle || 'APPARATUS').toUpperCase().slice(0, 22), 28, 56);
+    g.fillText((levelTitle || 'APPARATET').toUpperCase().slice(0, 22), 28, 56);
     g.font = '500 14px "IBM Plex Mono", monospace';
-    g.fillText('DWG. NO. IA-' + String(W * 100 + D).padStart(4, '0') + '   SCALE 1:1 CELL', 28, h - 30);
+    g.fillText('TEGN. NR. DUA-' + String(W * 100 + D).padStart(4, '0') + '   MÅLESTOKK 1:1 RUTE', 28, h - 30);
   });
   const sheet = mk(new THREE.PlaneGeometry(4.2, 2.95), std({ map: bp, roughness: 0.9 }), W / 2 + 4.2, 0.012, D / 2 + 1.5, { rx: -Math.PI / 2, cast: false });
   sheet.rotation.z = 0.18;
